@@ -34,7 +34,8 @@ overrides:
     depends: [libc6 (>= ${PACKAGE_LIBC_MIN}), libgcc-s1, libxkbcommon0, poppler-utils, wl-clipboard]
     recommends: [network-manager]
   rpm:
-    depends: [glibc >= ${PACKAGE_LIBC_MIN}, libgcc, libxkbcommon, poppler-utils, wl-clipboard]
+    # Capabilities and paths work across Fedora and openSUSE package names.
+    depends: [glibc >= ${PACKAGE_LIBC_MIN}, 'libgcc_s.so.1()(64bit)', 'libxkbcommon.so.0()(64bit)', /usr/bin/pdfinfo, /usr/bin/pdftoppm, /usr/bin/wl-copy, /usr/bin/wl-paste]
     recommends: [NetworkManager]
   archlinux:
     depends: [glibc, gcc-libs, libxkbcommon, poppler, wl-clipboard]
