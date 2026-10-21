@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>eu.pinepaper.PinePaper.Rust</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>PinePaper</name>
+  <summary>A native notebook and reader for e-ink</summary>
+  <description><p>Write pressure-sensitive notes, organise notebooks and folders, read PDF and EPUB books, annotate pages and export your work. PinePaper includes a fullscreen touch keyboard and controls for PineNote displays.</p></description>
+  <launchable type="desktop-id">eu.pinepaper.PinePaper.Rust.desktop</launchable>
+  <url type="homepage">https://github.com/porcupin26/pinepaper</url>
+  <url type="bugtracker">https://github.com/porcupin26/pinepaper/issues</url>
+  <developer id="io.github.porcupin26"><name>PinePaper contributors</name></developer>
+  <content_rating type="oars-1.1"/>
+  <releases><release version="0.4.0" date="2026-10-18"/><release version="0.3.0" date="2026-10-18"/></releases>
+</component>

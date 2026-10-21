@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=PinePaper
+GenericName=Notebook and Reader
+Comment=Write, read and annotate on e-ink
+Exec=pinepaper %f
+Icon=eu.pinepaper.PinePaper.Rust
+Terminal=false
+Categories=Office;Viewer;
+MimeType=application/pdf;application/epub+zip;text/plain;
+StartupNotify=true
+StartupWMClass=eu.pinepaper.PinePaper.Rust

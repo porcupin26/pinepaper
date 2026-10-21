@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""Exercise a real Wayland session in an isolated headless Sway compositor.
+
+Needs sway, grim, wtype, and a built binary. Never opens the user's library.
+"""
+import json
+import math
+import os
+from pathlib import Path
+import sqlite3
+import subprocess
+import sys
+import tempfile
+import time
+
+
+def main():
+    binary = Path(sys.argv[1] if len(sys.argv) > 1 else 'target/release/pinepaper').resolve()
+    output = Path('artifacts/wayland').resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='pinepaper-wayland-') as directory:
+        root = Path(directory)
+        root.chmod(0o700)
+        env = dict(os.environ, XDG_RUNTIME_DIR=str(root), WLR_BACKENDS='headless',
+                   WLR_LIBINPUT_NO_DEVICES='1', WLR_RENDERER='pixman')
+        env.pop('SWAYSOCK', None)
+        env.pop('WAYLAND_DISPLAY', None)
+        config = root / 'sway.conf'
+        config.write_text('output HEADLESS-1 mode 1872x1404 scale 2\nseat seat0 fallback true\n')
+        with (output / 'sway.log').open('w') as log:
+            compositor = subprocess.Popen(['sway', '-c', str(config)], env=env,
+                                          stdout=log, stderr=log)
+            app = None
+            pointer = None
+            try:
+                for _ in range(100):
+                    sockets = list(root.glob('sway-ipc*.sock'))
+                    displays = [p for p in root.glob('wayland-*') if not p.name.endswith('.lock')]
+                    if sockets and displays:
+                        break
+                    if compositor.poll() is not None:
+                        raise RuntimeError('Headless compositor failed; see sway.log')
+                    time.sleep(.1)
+                env.update(SWAYSOCK=str(sockets[0]), WAYLAND_DISPLAY=displays[0].name)
+
+                def sway(command):
+                    result = subprocess.check_output(['swaymsg', '-r', command], env=env, text=True)
+                    assert all(r['success'] for r in json.loads(result)), result
+
+                def key(*args):
+                    subprocess.run(['wtype', '-s', '200', *args], env=env, check=True)
+                    time.sleep(.2)
+
+                pointer = subprocess.Popen([str(binary.parent / 'examples/wayland_pointer')],
+                                           env=env, stdin=subprocess.PIPE, text=True)
+                time.sleep(.4)
+
+                def point(command):
+                    pointer.stdin.write(command + '\n')
+                    pointer.stdin.flush()
+                    time.sleep(.01)
+
+                def click(x, y, w=936, h=702):
+                    point(f'move {x} {y} {w} {h}')
+                    point('down')
+                    point('up')
+                    time.sleep(.3)
+
+                with (output / 'app.log').open('w') as app_log:
+                    app = subprocess.Popen([str(binary), '--data-dir', str(root / 'library')],
+                                           env=env, stdout=app_log, stderr=app_log)
+                    time.sleep(1)
+                    click(870, 65)  # Create, then Notebook in the anchored popup.
+                    click(650, 166)
+                    db = sqlite3.connect(root / 'library/library.sqlite3')
+                    assert db.execute('SELECT title FROM documents').fetchone()[0] == 'Notebook 1'
+                    click(160, 65)  # Naming is optional, through the document title.
+                    key('-M', 'ctrl', 'a', '-m', 'ctrl')
+                    key('Wayland notebook')
+                    key('-k', 'Return')
+                    time.sleep(.3)
+                    actual=db.execute('SELECT title FROM documents').fetchone()
+                    subprocess.run(['grim', str(output / 'created.png')], env=env, check=True)
+                    assert actual[0] == 'Wayland notebook', actual
+                    # A virtual device advertises pointer capability on a headless seat.
+                    point('move 150 240 936 702')
+                    point('down')
+                    for i in range(80):
+                        point(f'move {150 + i * 3} {int(240 + math.sin(i / 8) * 35)} 936 702')
+                    point('up')
+                    time.sleep(.5)
+                    payload = json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])
+                    assert len(payload['strokes']) == 1, payload
+                    assert len(payload['strokes'][0]['points']) > 50
+                    subprocess.run(['grim', str(output / 'landscape.png')], env=env, check=True)
+                    click(34, 126)
+                    subprocess.run(['grim', str(output / 'pen-popup.png')], env=env, check=True)
+                    click(650, 600)  # Dismiss outside; this must never ink the page.
+                    assert len(json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])['strokes']) == 1
+                    sway('output HEADLESS-1 transform 90')
+                    time.sleep(.5)
+                    subprocess.run(['grim', str(output / 'portrait.png')], env=env, check=True)
+                    key('-M', 'ctrl', 'n', '-m', 'ctrl')
+                    click(160, 65, 702, 936)
+                    key('-M', 'ctrl', 'a', '-m', 'ctrl')
+                    key('Draft żółć')
+                    sway('output HEADLESS-1 transform normal')
+                    time.sleep(.4)
+                    subprocess.run(['grim', str(output / 'keyboard.png')], env=env, check=True)
+                    key('-k', 'Return')
+                    assert db.execute('SELECT count(*) FROM documents').fetchone()[0] == 2
+                    assert db.execute("SELECT count(*) FROM documents WHERE title='Draft żółć'").fetchone()[0] == 1
+                    key('-k', 'F11')
+                    key('-k', 'F11')
+                    key('-M', 'ctrl', 'q', '-m', 'ctrl')
+                    assert app.wait(timeout=10) == 0
+                    db.close()
+                (output / 'result.json').write_text(json.dumps({'passed': True,
+                    'checks': ['native Wayland launch', 'Create opens drawing immediately', 'optional title rename', 'pointer ink persisted', 'pen popup and outside dismissal without ink',
+                               'rotation', 'draft preserved across rotation', 'fullscreen', 'clean close']}, indent=2))
+                print('Headless Wayland checks passed')
+            finally:
+                if pointer:
+                    pointer.stdin.close()
+                    pointer.wait(timeout=10)
+                if app and app.poll() is None:
+                    app.terminate()
+                    app.wait(timeout=10)
+                compositor.terminate()
+                compositor.wait(timeout=10)
+
+
+if __name__ == '__main__':
+    main()

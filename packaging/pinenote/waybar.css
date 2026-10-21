@@ -1,0 +1,14 @@
+@import url("/usr/share/pinenote-config/waybar/style.css");
+
+#waybar.top #custom-pinepaper {
+    min-width: 42px;
+    padding: 0 4px;
+    background-image: url("/etc/pinepaper/waybar/pinepaper.svg");
+    background-size: 32px 32px;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+#waybar.top #custom-pinepaper:hover {
+    background-color: #555555;
+}

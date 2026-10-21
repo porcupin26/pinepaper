@@ -1,0 +1,26 @@
+# Build natively on x86_64 Arch or aarch64 Arch Linux ARM / PineNote.
+pkgname=pinepaper
+pkgver=0.4.0
+pkgrel=1
+pkgdesc='Native notebook and PDF/EPUB reader for PineNote and Wayland'
+arch=('x86_64' 'aarch64')
+url='https://github.com/porcupin26/pinepaper'
+license=('MIT')
+depends=('glibc' 'gcc-libs' 'libxkbcommon' 'poppler' 'wl-clipboard')
+optdepends=('networkmanager: Wi-Fi status' 'sway: PineNote per-window refresh hints')
+makedepends=('rust' 'git')
+source=("git+https://github.com/porcupin26/pinepaper.git#tag=v$pkgver")
+sha256sums=('SKIP') # Git tag; Cargo.lock pins and checksums dependencies.
+build() {
+  cd "$srcdir/pinepaper"
+  # Native ARM builds must not use the workstation's cross-linker configuration.
+  CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=cc cargo build --release --locked
+}
+check() {
+  cd "$srcdir/pinepaper"
+  CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=cc cargo test --locked
+}
+package() {
+  cd "$srcdir/pinepaper"
+  DESTDIR="$pkgdir" PREFIX=/usr bash packaging/install.sh target/release/pinepaper
+}

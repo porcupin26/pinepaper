@@ -1,0 +1,44 @@
+name: pinepaper
+arch: ${PACKAGE_ARCH}
+platform: linux
+version: ${PACKAGE_VERSION}
+release: 1
+section: editors
+priority: optional
+maintainer: PinePaper contributors <porcupin26@users.noreply.github.com>
+description: Native notebook, PDF and EPUB reader for PineNote and Linux Wayland desktops.
+vendor: PinePaper contributors
+homepage: https://github.com/porcupin26/pinepaper
+license: MIT
+mtime: ${PACKAGE_MTIME}
+umask: 0022
+contents:
+  - src: ${PACKAGE_BINARY}
+    dst: /usr/bin/pinepaper
+    file_info:
+      mode: 0755
+  - src: packaging/eu.pinepaper.PinePaper.Rust.desktop
+    dst: /usr/share/applications/eu.pinepaper.PinePaper.Rust.desktop
+  - src: assets/eu.pinepaper.PinePaper.Rust.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/eu.pinepaper.PinePaper.Rust.svg
+  - src: packaging/eu.pinepaper.PinePaper.Rust.metainfo.xml
+    dst: /usr/share/metainfo/eu.pinepaper.PinePaper.Rust.metainfo.xml
+  - src: LICENSE
+    dst: /usr/share/licenses/pinepaper/LICENSE
+  - src: assets/FONT-LICENSE.txt
+    dst: /usr/share/licenses/pinepaper/FONT-LICENSE.txt
+  - src: README.md
+    dst: /usr/share/doc/pinepaper/README.md
+overrides:
+  deb:
+    depends: [libc6 (>= ${PACKAGE_LIBC_MIN}), libgcc-s1, libxkbcommon0, poppler-utils, wl-clipboard]
+    recommends: [network-manager]
+  rpm:
+    depends: [glibc >= ${PACKAGE_LIBC_MIN}, libgcc, libxkbcommon, poppler-utils, wl-clipboard]
+    recommends: [NetworkManager]
+  archlinux:
+    depends: [glibc, gcc-libs, libxkbcommon, poppler, wl-clipboard]
+    recommends: [networkmanager]
+archlinux:
+  pkgbase: pinepaper
+  packager: PinePaper contributors <porcupin26@users.noreply.github.com>

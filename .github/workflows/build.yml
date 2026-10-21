@@ -1,0 +1,117 @@
+name: Test and package Linux
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+        with:
+          toolchain: '1.96.0'
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils libxkbcommon0 desktop-file-utils sway grim wtype
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+      - run: cargo run --locked -- --smoke artifacts/smoke
+      - run: cargo build --release --locked --bin pinepaper --example wayland_pointer
+      - run: python3 tests/wayland_smoke.py
+      - run: desktop-file-validate packaging/eu.pinepaper.PinePaper.Rust.desktop
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: visual-smoke-test
+          path: artifacts/
+          if-no-files-found: warn
+
+  packages:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            arch: x86_64
+          - runner: ubuntu-22.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: cc
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+        with:
+          toolchain: '1.96.0'
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+      - name: Build dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential poppler-utils poppler-data libxkbcommon0 wl-clipboard squashfs-tools zstd rpm cpio desktop-file-utils
+      - run: cargo test --locked
+      - run: cargo build --release --locked
+      - name: Pinned packaging tools
+        run: |
+          bash packaging/install-build-tools.sh "$RUNNER_TEMP/tools"
+          echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
+      - name: DEB, RPM, Arch Linux / PineNote Arch, tar
+        run: bash packaging/build-packages.sh target/release/pinepaper '${{ matrix.arch }}'
+      - name: AppImage with bundled PDF tools
+        run: bash packaging/build-appimage.sh target/release/pinepaper '${{ matrix.arch }}'
+      - name: Verify package payloads
+        run: |
+          bash packaging/verify-packages.sh target/release/pinepaper '${{ matrix.arch }}'
+          APPIMAGE_EXTRACT_AND_RUN=1 dist/*.AppImage --version
+          cd dist
+          sha256sum *.deb *.rpm *.pkg.tar.zst *.tar.gz *.AppImage > SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-${{ matrix.arch }}-packages
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  flatpak:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+        with:
+          toolchain: '1.96.0'
+      - name: Flatpak SDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y flathub org.gnome.Sdk//49 org.gnome.Platform//49 org.freedesktop.Sdk.Extension.rust-stable//25.08
+      - run: bash packaging/build-flatpak.sh
+      - run: cd dist && sha256sum *.flatpak > SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: flatpak-${{ matrix.arch }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
