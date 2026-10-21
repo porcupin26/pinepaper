@@ -389,6 +389,7 @@ pub struct App {
     histories: HashMap<String, History>,
     gesture: Option<Gesture>,
     press: Option<Action>,
+    key_feedback: Vec<(Box2, Instant)>,
     control_drag: Option<ControlDrag>,
     press_start: (f64, f64),
     last_pointer: (f64, f64),
@@ -542,6 +543,7 @@ impl App {
             histories: HashMap::new(),
             gesture: None,
             press: None,
+            key_feedback: Vec::new(),
             control_drag: None,
             press_start: (0., 0.),
             last_pointer: (0., 0.),
@@ -576,6 +578,7 @@ impl App {
     }
     pub fn resize(&mut self, w: usize, h: usize, scale: i32) {
         self.finish();
+        self.key_feedback.clear();
         self.surface.resize(w, h, scale);
         self.redraw = true;
     }
@@ -602,6 +605,7 @@ impl App {
         Ok(())
     }
     fn input(&mut self, title: &str, value: String, purpose: InputPurpose, multiline: bool) {
+        self.key_feedback.clear();
         let n = value.chars().count();
         self.dialog = Some(Dialog::Input(Input {
             title: title.into(),
@@ -629,6 +633,7 @@ impl App {
         ));
     }
     pub fn act(&mut self, action: Action) {
+        let keyboard_mode = self.keyboard_mode();
         if self.dialog.is_none() {
             self.popup_anchor = self
                 .hits
@@ -643,6 +648,9 @@ impl App {
         };
         if let Err(e) = self.action(action) {
             self.fail(e);
+        }
+        if self.keyboard_mode() != keyboard_mode {
+            self.key_feedback.clear();
         }
         if let Some(Dialog::Menu(title, _)) = &self.dialog {
             if previous_menu.as_ref() != Some(title) {
@@ -1700,6 +1708,7 @@ impl App {
         }
     }
     pub fn tick(&mut self) {
+        self.expire_key_feedback(Instant::now());
         self.poll_exchange();
         if let Ok((stream, _)) = self.activation.accept() {
             use std::io::Read;
@@ -1871,6 +1880,40 @@ impl App {
             ui::status(self);
         }
     }
+    fn keyboard_mode(&self) -> Option<usize> {
+        match &self.dialog {
+            Some(Dialog::Input(i)) if i.keyboard => Some(i.mode),
+            _ => None,
+        }
+    }
+    pub fn key_flashing(&self, bounds: Box2) -> bool {
+        self.key_feedback.iter().any(|(b, _)| *b == bounds)
+    }
+    fn flash_key(&mut self, bounds: Box2) {
+        let until = Instant::now() + Duration::from_millis(500);
+        if let Some((_, deadline)) = self.key_feedback.iter_mut().find(|(b, _)| *b == bounds) {
+            *deadline = until;
+        } else {
+            self.key_feedback.push((bounds, until));
+        }
+        ui::repaint_keys(self, &[bounds]);
+    }
+    fn expire_key_feedback(&mut self, now: Instant) {
+        if self.keyboard_mode().is_none() {
+            self.key_feedback.clear();
+            return;
+        }
+        let mut expired = Vec::new();
+        self.key_feedback.retain(|(bounds, until)| {
+            if now >= *until {
+                expired.push(*bounds);
+                false
+            } else {
+                true
+            }
+        });
+        ui::repaint_keys(self, &expired);
+    }
     pub fn down(&mut self, x: f64, y: f64, pressure: f64, finger: bool) {
         if self.busy || self.gesture.is_some() {
             return;
@@ -1882,6 +1925,26 @@ impl App {
         self.press_start = (x, y);
         self.last_pointer = (x, y);
         self.press = self.hit(x, y);
+        if self.keyboard_mode().is_some() {
+            if let Some((bounds, action)) = self.hits.iter().rev().find(|(b, _)| b.contains(x, y)) {
+                if bounds.y >= self.surface.logical_h - ui::keyboard_height(self)
+                    && matches!(
+                        action,
+                        Action::Key(_)
+                            | Action::Shift
+                            | Action::KeyMode(_)
+                            | Action::Backspace
+                            | Action::Left
+                            | Action::Right
+                            | Action::SelectAll
+                            | Action::Copy
+                            | Action::Paste
+                    )
+                {
+                    self.flash_key(*bounds);
+                }
+            }
+        }
         self.control_drag = self.hits.iter().rev().find_map(|(bounds, action)| {
             (bounds.contains(x, y) && matches!(action, Action::Slider(_) | Action::Switch(_))).then(
                 || ControlDrag {
@@ -2451,6 +2514,74 @@ impl App {
         match &self.gesture {
             Some(Gesture::Ink(s)) => Some(s),
             _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod keyboard_feedback_tests {
+    use super::*;
+    use crate::render::{BLACK, WHITE};
+
+    #[test]
+    fn touch_feedback_preserves_typing_expires_independently_and_only_repaints_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut a = App::new(dir.path().into()).unwrap();
+        for (w, h, finger) in [(702, 936, true), (936, 702, false)] {
+            a.resize(w, h, 1);
+            a.act(Action::Search);
+            a.render();
+            let key = |a: &App, s: &str| {
+                a.hits
+                    .iter()
+                    .find(|(_, action)| *action == Action::Key(s.into()))
+                    .unwrap()
+                    .0
+            };
+            let q = key(&a, "q");
+            let e = key(&a, "e");
+            let pixel = |a: &App, b: Box2| {
+                a.surface.pixels[(b.y as usize + 8) * a.surface.width + b.x as usize + 8]
+            };
+            let hits = a.hits.clone();
+            a.damage = None;
+            a.motion(q.x + 10., q.y + 10., 0.);
+            assert_eq!(pixel(&a, q), WHITE, "Hover does not highlight");
+            for b in [q, e] {
+                a.down(b.x + 10., b.y + 10., 0.5, finger);
+                assert_eq!(pixel(&a, b), BLACK, "Feedback starts before release");
+                assert_eq!(a.damage, Some(a.surface.rect(b)));
+                assert_eq!(a.hits, hits, "Partial repaint must not change hit regions");
+                assert!(!a.redraw, "Feedback must not redraw the page");
+                a.up(b.x + 10., b.y + 10.);
+                a.render();
+                a.damage = None;
+            }
+            let Some(Dialog::Input(input)) = &a.dialog else {
+                panic!("Input closed");
+            };
+            assert_eq!(input.value, "qe");
+            let deadline = a.key_feedback[0].1;
+            a.key_feedback[1].1 = deadline + Duration::from_millis(100);
+            a.expire_key_feedback(deadline - Duration::from_millis(1));
+            assert_eq!(pixel(&a, q), BLACK);
+            a.expire_key_feedback(deadline);
+            assert_eq!(pixel(&a, q), WHITE);
+            assert_eq!(pixel(&a, e), BLACK, "Later presses keep their own duration");
+            assert_eq!(a.damage, Some(a.surface.rect(q)));
+            a.damage = None;
+            a.expire_key_feedback(deadline + Duration::from_millis(100));
+            assert_eq!(pixel(&a, e), WHITE);
+            assert_eq!(a.damage, Some(a.surface.rect(e)));
+            assert_eq!(a.hits, hits);
+            a.down(q.x + 10., q.y + 10., 0.5, finger);
+            a.finish();
+            a.act(Action::KeyMode(1));
+            assert!(
+                a.key_feedback.is_empty(),
+                "Do not highlight different keys after a layout change"
+            );
+            a.act(Action::Close);
         }
     }
 }

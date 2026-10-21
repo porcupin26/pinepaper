@@ -942,11 +942,7 @@ fn dialog_render(a: &mut App, d: Dialog) {
 fn input(a: &mut App, i: &Input) {
     let w = a.surface.logical_w;
     let h = a.surface.logical_h;
-    let kh = if i.keyboard {
-        a.prefs.keyboard_key_height * 4. + 74.
-    } else {
-        0.
-    };
+    let kh = if i.keyboard { keyboard_height(a) } else { 0. };
     let cw = (if i.multiline { 560_f64 } else { 520_f64 }).min(w - 32.);
     let ch = (if i.multiline { 326_f64 } else { 218_f64 }).min(h - kh - 58.);
     let card = Box2::new((w - cw) / 2., 42. + (h - kh - 42. - ch) / 2., cw, ch);
@@ -1038,6 +1034,38 @@ fn input(a: &mut App, i: &Input) {
         keyboard(a, i, h - kh);
     }
 }
+pub fn keyboard_height(a: &App) -> f64 {
+    a.prefs.keyboard_key_height * 4. + 74.
+}
+// Contact/expiry feedback only damages the touched key, never the document.
+pub fn repaint_keys(a: &mut App, keys: &[Box2]) {
+    if keys.is_empty() || a.redraw || a.busy {
+        return;
+    }
+    let Some(Dialog::Input(i)) = a
+        .dialog
+        .clone()
+        .filter(|d| matches!(d, Dialog::Input(i) if i.keyboard))
+    else {
+        return;
+    };
+    let old_clip = a.surface.clip;
+    let old_hits = a.hits.len();
+    let y = a.surface.logical_h - keyboard_height(a);
+    for &bounds in keys {
+        a.surface.clip = bounds;
+        keyboard(a, &i, y);
+        a.hits.truncate(old_hits);
+        a.surface.clip = old_clip;
+        a.dirty(a.surface.rect(bounds));
+    }
+}
+fn key_button(a: &mut App, label: &str, bounds: Box2, action: Action, selected: bool) {
+    button(a, label, bounds, action, selected ^ a.key_flashing(bounds));
+}
+fn key_icon(a: &mut App, icon: Icon, bounds: Box2, action: Action) {
+    icon_button(a, icon, bounds, action, a.key_flashing(bounds));
+}
 fn keyboard(a: &mut App, i: &Input, y: f64) {
     let w = a.surface.logical_w;
     let keyh = a.prefs.keyboard_key_height;
@@ -1054,9 +1082,9 @@ fn keyboard(a: &mut App, i: &Input, y: f64) {
     ] {
         let b = Box2::new(x, y + 6., bw, 32.);
         match action {
-            Action::Left => icon_button(a, Icon::Back, b, action, false),
-            Action::Right => icon_button(a, Icon::Next, b, action, false),
-            _ => button(a, label, b, action, false),
+            Action::Left => key_icon(a, Icon::Back, b, action),
+            Action::Right => key_icon(a, Icon::Next, b, action),
+            _ => key_button(a, label, b, action, false),
         }
         x += bw + 6.;
     }
@@ -1078,7 +1106,7 @@ fn keyboard(a: &mut App, i: &Input, y: f64) {
         let mut x = 8.;
         let yy = y + 44. + r as f64 * (keyh + 4.);
         if r == 2 {
-            button(
+            key_button(
                 a,
                 if i.shift == 2 { "CAPS" } else { "Shift" },
                 Box2::new(x, yy, kw, keyh),
@@ -1093,7 +1121,7 @@ fn keyboard(a: &mut App, i: &Input, y: f64) {
             } else {
                 c.to_string()
             };
-            button(
+            key_button(
                 a,
                 &key,
                 Box2::new(x, yy, kw, keyh),
@@ -1103,12 +1131,11 @@ fn keyboard(a: &mut App, i: &Input, y: f64) {
             x += kw + 5.;
         }
         if r == 2 {
-            icon_button(
+            key_icon(
                 a,
                 Icon::Backspace,
                 Box2::new(x, yy, kw, keyh),
                 Action::Backspace,
-                false,
             );
         }
     }
@@ -1127,7 +1154,7 @@ fn keyboard(a: &mut App, i: &Input, y: f64) {
         (".", 0.8, Action::Key(".".into())),
         ("Enter", 1.7, Action::Key("Enter".into())),
     ] {
-        button(
+        key_button(
             a,
             label,
             Box2::new(x, yy, unit * units - 4., keyh),

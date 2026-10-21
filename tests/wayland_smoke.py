@@ -74,6 +74,13 @@ def main():
                     db = sqlite3.connect(root / 'library/library.sqlite3')
                     assert db.execute('SELECT title FROM documents').fetchone()[0] == 'Notebook 1'
                     click(160, 65)  # Naming is optional, through the document title.
+                    point('move 52 539 936 702')  # Q on the built-in keyboard.
+                    point('down')
+                    time.sleep(.08)
+                    subprocess.run(['grim', str(output / 'key-pressed.png')], env=env, check=True)
+                    point('up')
+                    time.sleep(.65)
+                    subprocess.run(['grim', str(output / 'key-released.png')], env=env, check=True)
                     key('-M', 'ctrl', 'a', '-m', 'ctrl')
                     key('Wayland notebook')
                     key('-k', 'Return')
