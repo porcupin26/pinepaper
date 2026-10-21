@@ -393,7 +393,7 @@ pub fn selection_overlay(a: &mut App) {
     let v = a.view;
     let old = a.surface.clip;
     a.surface.clip = v.clip;
-    if let Some(b) = a.selection.bounds {
+    if let Some(b) = a.selection_frame() {
         a.surface.border(
             Box2::new(
                 v.x + b.x * v.zoom,
@@ -405,14 +405,20 @@ pub fn selection_overlay(a: &mut App) {
             1.,
         );
     }
-    if let Some(ends) = a.selected_endpoints() {
-        for p in ends {
-            let q = v.screen(p);
-            a.surface
-                .rounded(Box2::new(q[0] - 7., q[1] - 7., 14., 14.), 7., BLACK);
-            a.surface
-                .rounded(Box2::new(q[0] - 5., q[1] - 5., 10., 10.), 5., WHITE);
-        }
+    let handles: Vec<_> = if let Some(ends) = a.selected_endpoints() {
+        ends.into_iter().collect()
+    } else {
+        a.selected_resize_handles()
+            .into_iter()
+            .map(|(_, p)| p)
+            .collect()
+    };
+    for p in handles {
+        let q = v.screen(p);
+        a.surface
+            .rounded(Box2::new(q[0] - 7., q[1] - 7., 14., 14.), 7., BLACK);
+        a.surface
+            .rounded(Box2::new(q[0] - 5., q[1] - 5., 10., 10.), 5., WHITE);
     }
     a.surface.clip = old;
 }

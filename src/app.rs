@@ -1335,7 +1335,7 @@ impl App {
                 self.dialog = Some(
                     Dialog::Message(
                         "PinePaper · Rust".into(),
-                        "Pen: write on contact. Tap active Pen for nib settings. Hold a toolbar icon to see its name. Select: tap an object and drag its body to move it. Drag either circular handle on a selected line or arrow to move that endpoint. Lasso: surround several objects, then drag them. Diagram: pick a shape, then drag on the page. Quick sheets: Page overview → Make notebook moves selected pages into a named notebook. Fingers scroll; palm gestures are suppressed near the pen.\n\nNotes save automatically after each stroke. Import PDF, EPUB and text from My files. Export PDF or back up the entire library as ZIP.\n\nF11 fullscreen · Ctrl+N new · Ctrl+O import · Ctrl+Z undo · Ctrl+Shift+Z redo · Page Up/Down · Escape tools · Ctrl+Q quit"
+                        "Pen: write on contact. Tap active Pen for nib settings. Hold a toolbar icon to see its name. Select: tap an object and drag its body to move it. Drag either circular handle on a selected line or arrow to move that endpoint. Drag corner or edge handles on other diagram shapes to resize them; circles and squares keep their proportions. Lasso: surround several objects, then drag them. Diagram: pick a shape, then drag on the page. Quick sheets: Page overview → Make notebook moves selected pages into a named notebook. Fingers scroll; palm gestures are suppressed near the pen.\n\nNotes save automatically after each stroke. Import PDF, EPUB and text from My files. Export PDF or back up the entire library as ZIP.\n\nF11 fullscreen · Ctrl+N new · Ctrl+O import · Ctrl+Z undo · Ctrl+Shift+Z redo · Page Up/Down · Escape tools · Ctrl+Q quit"
                             .into(),
                     ),
                 );
@@ -2117,7 +2117,8 @@ impl App {
         }
         let on_handle = self.tool == "select"
             && self.view.clip.contains(x, y)
-            && self.endpoint_hit(self.view.world(x, y, pressure)).is_some();
+            && (self.endpoint_hit(self.view.world(x, y, pressure)).is_some()
+                || self.resize_hit(self.view.world(x, y, pressure)).is_some());
         if !(self.view.contains(x, y) || on_handle) {
             return;
         }
@@ -2223,8 +2224,10 @@ impl App {
             return;
         }
         let mut p = self.view.world(x, y, pressure);
-        p[0] = p[0].clamp(0., PAGE_W);
-        p[1] = p[1].clamp(0., PAGE_H);
+        if !matches!(self.gesture, Some(Gesture::ObjectEdit(_))) {
+            p[0] = p[0].clamp(0., PAGE_W);
+            p[1] = p[1].clamp(0., PAGE_H);
+        } // Object edits constrain their geometry while retaining the handle grab offset.
         let mut gesture = self.gesture.take().unwrap();
         match &mut gesture {
             Gesture::Ink(s) => {

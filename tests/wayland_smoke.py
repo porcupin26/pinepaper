@@ -155,6 +155,35 @@ def main():
                     key('-M','ctrl','z','-m','ctrl')
                     restored=json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])['strokes'][-1]['points'][:2]
                     assert restored == edited
+                    click(34,376)
+                    click(340,437)  # Rectangle, second row of the diagram palette.
+                    point('move 550 300 936 702')
+                    point('down')
+                    point('move 740 420 936 702')
+                    point('up')
+                    time.sleep(.4)
+                    rectangle=json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])['strokes'][-1]
+                    assert rectangle['diagram_shape']=='Rectangle', rectangle
+                    click(34,426)
+                    click(645,360)
+                    pad=(max(rectangle['width']*4,1)+8)*zoom
+                    hx,hy=round(740+pad),round(420+pad)
+                    subprocess.run(['grim',str(output/'shape-handles.png')],env=env,check=True)
+                    point(f'move {hx} {hy} 936 702')
+                    point('down')
+                    for i in range(1,11):
+                        point(f'move {hx+i*5} {hy+i*3} 936 702')
+                    point('up')
+                    time.sleep(.4)
+                    assert app.poll() is None, 'App exited during shape resize'
+                    resized=json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])['strokes'][-1]
+                    assert resized['points'][0]==rectangle['points'][0]
+                    assert abs((resized['points'][2][0]-rectangle['points'][2][0])*zoom-50)<.1
+                    assert abs((resized['points'][2][1]-rectangle['points'][2][1])*zoom-30)<.1
+                    assert resized['width']==rectangle['width']
+                    subprocess.run(['grim',str(output/'resized-shape.png')],env=env,check=True)
+                    key('-M','ctrl','z','-m','ctrl')
+                    assert json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])['strokes'][-1]==rectangle
                     sway('output HEADLESS-1 transform 90')
                     time.sleep(.5)
                     subprocess.run(['grim', str(output / 'portrait.png')], env=env, check=True)
@@ -175,7 +204,7 @@ def main():
                     db.close()
                 (output / 'result.json').write_text(json.dumps({'passed': True,
                     'checks': ['native Wayland launch', 'Notebook toolbar action opens drawing immediately', 'optional title rename', 'pointer ink persisted', 'pen popup and outside dismissal without ink',
-                               'hold tool label', 'diagram palette and curved gesture ending at release', 'Select and endpoint handles', 'move arrow body and undo', 'rotation', 'draft preserved across rotation', 'fullscreen', 'clean close']}, indent=2))
+                               'hold tool label', 'diagram palette and curved gesture ending at release', 'Select and endpoint handles', 'move arrow body and undo', 'shape resize handles, fixed anchor, persistence and undo', 'rotation', 'draft preserved across rotation', 'fullscreen', 'clean close']}, indent=2))
                 print('Headless Wayland checks passed')
             finally:
                 if pointer:

@@ -3,7 +3,16 @@ use crate::{diagram, model::distance};
 
 pub(super) enum EditKind {
     Move,
-    Endpoint { stroke: usize, end: usize },
+    Endpoint {
+        stroke: usize,
+        end: usize,
+    },
+    Resize {
+        stroke: usize,
+        handle: diagram::ResizeHandle,
+        bounds: Box2,
+        uniform: bool,
+    },
 }
 pub(super) struct ObjectEdit {
     pub original: Payload,
@@ -17,6 +26,71 @@ pub(super) struct ObjectEdit {
 }
 
 impl App {
+    fn selected_resize_shape(&self) -> Option<(usize, Box2, bool)> {
+        if self.tool != "select"
+            || self.selection.strokes.len() != 1
+            || !self.selection.texts.is_empty()
+        {
+            return None;
+        }
+        let i = self.selection.strokes[0];
+        let s = self.page()?.payload.strokes.get(i)?;
+        Some((
+            i,
+            diagram::bounds(s)?,
+            matches!(
+                diagram::shape(s)?,
+                diagram::Shape::Square | diagram::Shape::Circle
+            ),
+        ))
+    }
+    pub fn selection_frame(&self) -> Option<Box2> {
+        let b = self.selection.bounds?;
+        if self.selected_resize_shape().is_some() {
+            // Keep the frame and its handles on paper, including shapes at an edge.
+            let x = b.x.clamp(0., PAGE_W);
+            let y = b.y.clamp(0., PAGE_H);
+            Some(Box2::new(
+                x,
+                y,
+                (b.x + b.w).clamp(x, PAGE_W) - x,
+                (b.y + b.h).clamp(y, PAGE_H) - y,
+            ))
+        } else {
+            Some(b)
+        }
+    }
+    pub fn selected_resize_handles(&self) -> Vec<(diagram::ResizeHandle, Point)> {
+        let Some((_, _, uniform)) = self.selected_resize_shape() else {
+            return vec![];
+        };
+        let Some(b) = self.selection_frame() else {
+            return vec![];
+        };
+        diagram::ResizeHandle::ALL
+            .into_iter()
+            .filter(|handle| {
+                let (x, y) = handle.axes();
+                // Keep tiny objects usable: omit edge handles that overlap corners.
+                (x != 0 && y != 0)
+                    || (!uniform
+                        && if x == 0 {
+                            b.w * self.view.zoom >= 60.
+                        } else {
+                            b.h * self.view.zoom >= 60.
+                        })
+            })
+            .map(|handle| (handle, handle.point(b)))
+            .collect()
+    }
+    pub(super) fn resize_hit(&self, p: Point) -> Option<diagram::ResizeHandle> {
+        self.selected_resize_handles()
+            .into_iter()
+            .map(|(handle, q)| (handle, (q[0] - p[0]).hypot(q[1] - p[1]) * self.view.zoom))
+            .filter(|(_, d)| *d <= 15.)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(h, _)| h)
+    }
     /// Endpoints are derived from the first two points, including diagrams saved by 0.6.0.
     pub fn selected_endpoints(&self) -> Option<[Point; 2]> {
         if self.tool != "select"
@@ -47,6 +121,15 @@ impl App {
             EditKind::Endpoint {
                 stroke: self.selection.strokes[0],
                 end,
+            }
+        } else if let (Some(handle), Some((stroke, bounds, uniform))) =
+            (self.resize_hit(p), self.selected_resize_shape())
+        {
+            EditKind::Resize {
+                stroke,
+                handle,
+                bounds,
+                uniform,
             }
         } else {
             let Some(page) = self.page() else {
@@ -146,6 +229,28 @@ impl App {
             return;
         };
         match edit.kind {
+            EditKind::Resize {
+                stroke,
+                handle,
+                bounds,
+                uniform,
+            } => {
+                if let (Some(original), Some(target)) = (
+                    edit.original.strokes.get(stroke),
+                    page.payload.strokes.get_mut(stroke),
+                ) {
+                    let next = handle.resized(
+                        bounds,
+                        p[0] - edit.start[0],
+                        p[1] - edit.start[1],
+                        uniform,
+                        4. / self.view.zoom,
+                    );
+                    if let Some(updated) = diagram::with_bounds(original, next) {
+                        *target = updated;
+                    }
+                }
+            }
             EditKind::Move => {
                 let b = edit.bounds;
                 let dx = (p[0] - edit.start[0]).clamp((-b.x).min(0.), (PAGE_W - b.x - b.w).max(0.));

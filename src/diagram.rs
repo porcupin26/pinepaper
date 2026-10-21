@@ -1,5 +1,6 @@
 //! Basic diagram geometry, stored as ordinary ink objects for export and sharing.
 use crate::model::{Point, Stroke, PAGE_H, PAGE_W};
+use crate::render::Box2;
 use serde::{Deserialize, Serialize};
 use std::f64::consts::TAU;
 
@@ -147,4 +148,133 @@ pub fn with_endpoint(stroke: &Stroke, end: usize, point: Point) -> Option<Stroke
     let mut updated = stroke.clone();
     updated.points = geometry.points;
     Some(updated) // Keep shared object identity, style and all unknown metadata.
+}
+
+/// Clockwise handles around a closed shape's selection frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResizeHandle {
+    NorthWest,
+    North,
+    NorthEast,
+    East,
+    SouthEast,
+    South,
+    SouthWest,
+    West,
+}
+impl ResizeHandle {
+    pub const ALL: [Self; 8] = [
+        Self::NorthWest,
+        Self::North,
+        Self::NorthEast,
+        Self::East,
+        Self::SouthEast,
+        Self::South,
+        Self::SouthWest,
+        Self::West,
+    ];
+    pub fn axes(self) -> (i8, i8) {
+        match self {
+            Self::NorthWest => (-1, -1),
+            Self::North => (0, -1),
+            Self::NorthEast => (1, -1),
+            Self::East => (1, 0),
+            Self::SouthEast => (1, 1),
+            Self::South => (0, 1),
+            Self::SouthWest => (-1, 1),
+            Self::West => (-1, 0),
+        }
+    }
+    pub fn point(self, b: Box2) -> Point {
+        let (x, y) = self.axes();
+        [
+            b.x + (x as f64 + 1.) * b.w / 2.,
+            b.y + (y as f64 + 1.) * b.h / 2.,
+            0.5,
+        ]
+    }
+    /// Keep the opposite corner/edge fixed. Stop at a small visible size rather
+    /// than flipping the shape through its anchor; constrain all edges to paper.
+    pub fn resized(self, b: Box2, dx: f64, dy: f64, uniform: bool, minimum: f64) -> Box2 {
+        let (sx, sy) = self.axes();
+        if dx.abs() < 1e-9 && dy.abs() < 1e-9 {
+            return b;
+        }
+        let axis = |low: f64, size: f64, delta: f64, sign: i8, limit: f64| {
+            if sign == 0 || delta.abs() < 1e-9 {
+                return (low, size);
+            }
+            let anchor = if sign < 0 { low + size } else { low };
+            let maximum = if sign < 0 { anchor } else { limit - anchor }.max(0.);
+            let size = (size + delta * sign as f64).clamp(minimum.min(maximum), maximum);
+            (if sign < 0 { anchor - size } else { anchor }, size)
+        };
+        if uniform && sx != 0 && sy != 0 {
+            if (dx * sx as f64 + dy * sy as f64).abs() < 1e-9 {
+                return b;
+            }
+            let ax = if sx < 0 { b.x + b.w } else { b.x };
+            let ay = if sy < 0 { b.y + b.h } else { b.y };
+            let maximum = (if sx < 0 { ax } else { PAGE_W - ax })
+                .min(if sy < 0 { ay } else { PAGE_H - ay })
+                .max(0.);
+            let side = ((b.w + dx * sx as f64 + b.h + dy * sy as f64) / 2.)
+                .clamp(minimum.min(maximum), maximum);
+            Box2::new(
+                if sx < 0 { ax - side } else { ax },
+                if sy < 0 { ay - side } else { ay },
+                side,
+                side,
+            )
+        } else {
+            let (x, w) = axis(b.x, b.w, dx, sx, PAGE_W);
+            let (y, h) = axis(b.y, b.h, dy, sy, PAGE_H);
+            Box2::new(x, y, w, h)
+        }
+    }
+}
+pub fn bounds(stroke: &Stroke) -> Option<Box2> {
+    if !shape(stroke)?.closed() || stroke.points.is_empty() {
+        return None;
+    }
+    let (mut x, mut y, mut right, mut bottom) = (
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+    );
+    for p in &stroke.points {
+        if !p[0].is_finite() || !p[1].is_finite() {
+            return None;
+        }
+        x = x.min(p[0]);
+        y = y.min(p[1]);
+        right = right.max(p[0]);
+        bottom = bottom.max(p[1]);
+    }
+    Some(Box2::new(x, y, right - x, bottom - y))
+}
+pub fn with_bounds(stroke: &Stroke, next: Box2) -> Option<Stroke> {
+    let old = bounds(stroke)?;
+    if [
+        old.x - next.x,
+        old.y - next.y,
+        old.w - next.w,
+        old.h - next.h,
+    ]
+    .iter()
+    .all(|d| d.abs() < 1e-9)
+    {
+        return Some(stroke.clone());
+    }
+    let mut updated = stroke.clone();
+    updated.points = shape(stroke)?
+        .stroke(
+            [next.x, next.y, 0.5],
+            [next.x + next.w, next.y + next.h, 0.5],
+            stroke.width,
+            stroke.color,
+        )
+        .points;
+    Some(updated) // Preserve line weight, style, shared identity and unknown metadata.
 }

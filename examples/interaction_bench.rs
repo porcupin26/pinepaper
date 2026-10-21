@@ -61,7 +61,44 @@ fn main() -> anyhow::Result<()> {
         app.up(p[0], p[1]);
         app.act(Action::Undo);
         app.render();
+        app.act(Action::Shape(Shape::Ellipse));
+        app.render();
+        let start = app.view.screen([180., 200., 0.5]);
+        let end = app.view.screen([480., 600., 0.5]);
+        app.down(start[0], start[1], 0.5, false);
+        app.up(end[0], end[1]);
+        app.act(Action::Tool("select".into()));
+        app.render();
+        let center = app.view.screen([330., 400., 0.5]);
+        app.down(center[0], center[1], 0.5, false);
+        app.up(center[0], center[1]);
+        app.render();
+        // Select by the outline on crowded pages (ink wins over empty interiors).
+        if app.selected_resize_handles().is_empty() {
+            let edge = app.view.screen([480., 400., 0.5]);
+            app.down(edge[0], edge[1], 0.5, false);
+            app.up(edge[0], edge[1]);
+            app.render();
+        }
+        let handle = app
+            .selected_resize_handles()
+            .into_iter()
+            .find(|(kind, _)| *kind == pinepaper::diagram::ResizeHandle::SouthEast)
+            .unwrap()
+            .1;
+        let p = app.view.screen(handle);
+        app.down(p[0], p[1], 0.5, false);
+        app.render();
+        measure(&mut app, "resize", crowded, |i| {
+            [
+                handle[0] + 30. * (i as f64 * 0.12).sin(),
+                handle[1] + i as f64 * 0.5,
+                0.5,
+            ]
+        });
+        app.up(p[0], p[1]);
     }
+    app.saver.flush()?;
     Ok(())
 }
 fn measure(app: &mut App, action: &str, crowded: bool, point: impl Fn(usize) -> Point) {
