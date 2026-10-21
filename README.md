@@ -329,7 +329,7 @@ The workflow runs formatting, Clippy, tests and visual smoke checks, then builds
 | Flatpak `.flatpak` | Yes | Yes |
 | Portable installation tree `.tar.gz` | Yes | Yes |
 
-Builds run on pushes, pull requests, `v*` tags and manual workflow dispatch.
+Builds run on pushes to `main`, pull requests, `v*` tags and manual workflow dispatch.
 Artifacts and SHA-256 manifests are attached to the workflow run; the workflow
 does not publish releases or upload to distribution repositories. Common native
 packages and AppImages use Ubuntu 22.04 builders (glibc 2.35 baseline). Flatpak
@@ -381,6 +381,8 @@ cargo build --release --locked --bin pinepaper --example wayland_pointer
 python3 tests/wayland_smoke.py
 ```
 
+CI also runs the real three-client collaboration test against a pinned revision
+of the relay, including reconnection and joining while another participant leaves.
 Tests cover transactional persistence, folder cycles, page restrictions,
 backup restoration, EPUB spine order, readable PDF export, hover/contact,
 240 intermediate pen samples, undo/redo, Unicode editing, portrait/landscape

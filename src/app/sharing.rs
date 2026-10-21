@@ -188,12 +188,13 @@ impl App {
             }
             Event::Left(peer) => {
                 s.peers.retain(|p| p != &peer);
-                if s.replica.is_none() {
-                    if let Some(peer) = s.peers.first() {
-                        s.link.send(Command::NeedState(peer.clone()));
-                    } else {
-                        s.status = "Waiting for a participant with a document…".into();
-                    }
+                // A departing participant may have supplied an older in-flight
+                // snapshot while the newcomer was joining. Reconcile with a
+                // remaining participant even if we already received a replica.
+                if let Some(peer) = s.peers.first() {
+                    s.link.send(Command::NeedState(peer.clone()));
+                } else if s.replica.is_none() {
+                    s.status = "Waiting for a participant with a document…".into();
                 }
             }
             Event::NeedState(peer) => self.send_snapshot(Some(peer)),
@@ -274,6 +275,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[track_caller]
     fn pump(apps: &mut [&mut App], check: impl Fn(&[&mut App]) -> bool) {
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
@@ -287,7 +289,14 @@ mod tests {
                 Instant::now() < deadline,
                 "Timed out: {:?}",
                 apps.iter()
-                    .map(|a| (a.notice.clone(), a.sharing_label()))
+                    .map(|a| (
+                        a.notice.clone(),
+                        a.sharing_label(),
+                        a.pages
+                            .iter()
+                            .map(|p| (p.payload.strokes.len(), p.tags.clone(), p.bookmarked))
+                            .collect::<Vec<_>>()
+                    ))
                     .collect::<Vec<_>>()
             );
             thread::sleep(Duration::from_millis(15));
