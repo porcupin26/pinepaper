@@ -230,64 +230,66 @@ fn sqlite_compatibility_save_order_backup_and_folders() {
 
 #[test]
 fn all_nibs_live_pixels_match_full_repaint_including_toned_overlapping_highlights() {
-    for pen in PENS {
-        for tool in ["pen", "highlighter"] {
-            let mut p = Payload::blank("Grid");
-            let mut c = Surface::new();
-            c.resize(380, 520, 1);
-            let view = View {
-                x: 0.,
-                y: 0.,
-                zoom: 0.5,
-                clip: Box2::new(0., 0., 380., 520.),
+    let styles = PENS
+        .into_iter()
+        .flat_map(|pen| [(pen, "pen"), (pen, "highlighter")])
+        .chain(BRUSHES.into_iter().map(|pen| (pen, "brush")));
+    for (pen, tool) in styles {
+        let mut p = Payload::blank("Grid");
+        let mut c = Surface::new();
+        c.resize(380, 520, 1);
+        let view = View {
+            x: 0.,
+            y: 0.,
+            zoom: 0.5,
+            clip: Box2::new(0., 0., 380., 520.),
+        };
+        c.page(view, &p, None, true);
+        c.tone(view.clip, 1.35, 1.2);
+        for offset in [0., 3.] {
+            let stroke = Stroke {
+                pen: pen.into(),
+                tool: tool.into(),
+                width: if tool == "brush" { 16. } else { 3. },
+                color: 0.4,
+                points: (0..120)
+                    .map(|i| {
+                        [
+                            100. + i as f64 * 2.,
+                            200. + offset + (i as f64 / 12.).sin() * 30.,
+                            i as f64 / 120.,
+                        ]
+                    })
+                    .collect(),
+                extra: Default::default(),
             };
-            c.page(view, &p, None, true);
-            c.tone(view.clip, 1.35, 1.2);
-            for offset in [0., 3.] {
-                let stroke = Stroke {
-                    pen: pen.into(),
-                    tool: tool.into(),
-                    width: 3.,
-                    color: 0.4,
-                    points: (0..120)
-                        .map(|i| {
-                            [
-                                100. + i as f64 * 2.,
-                                200. + offset + (i as f64 / 12.).sin() * 30.,
-                                i as f64 / 120.,
-                            ]
-                        })
-                        .collect(),
-                    extra: Default::default(),
-                };
-                c.begin_stroke();
-                for i in 0..stroke.points.len() {
-                    let before = c.pixels.clone();
-                    let r = c.segment(
-                        view,
-                        stroke.points[i.saturating_sub(1)],
-                        stroke.points[i],
-                        &stroke,
-                    );
-                    for (j, (&a, &b)) in before.iter().zip(&c.pixels).enumerate() {
-                        if a != b {
-                            assert!(
-                                j % c.width >= r.x
-                                    && j % c.width < r.right
-                                    && j / c.width >= r.y
-                                    && j / c.width < r.bottom
-                            );
-                        }
+            c.begin_stroke();
+            for i in 0..stroke.points.len() {
+                let before = c.pixels.clone();
+                let r = c.segment(
+                    view,
+                    stroke.points[i.saturating_sub(1)],
+                    stroke.points[i],
+                    &stroke,
+                );
+                for (j, (&a, &b)) in before.iter().zip(&c.pixels).enumerate() {
+                    if a != b {
+                        assert!(
+                            j % c.width >= r.x
+                                && j % c.width < r.right
+                                && j / c.width >= r.y
+                                && j / c.width < r.bottom
+                        );
                     }
                 }
-                p.strokes.push(stroke);
             }
-            let live = c.pixels.clone();
-            c.clear_tone();
-            c.page(view, &p, None, true);
-            c.tone(view.clip, 1.35, 1.2);
-            assert_eq!(live, c.pixels, "{pen}/{tool}");
+            p.strokes.push(stroke);
         }
+        let live = c.pixels.clone();
+        c.clear_tone();
+        c.page(view, &p, None, true);
+        c.tone(view.clip, 1.35, 1.2);
+        assert_eq!(live, c.pixels, "{pen}/{tool}");
     }
 }
 

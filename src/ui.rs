@@ -4,7 +4,7 @@ use crate::{
     app::{Action, App, Dialog, Input, Screen, Settings, SliderSetting, SwitchSetting},
     diagram::Shape,
     icons::Icon,
-    model::{Stroke, PAGE_H, PAGE_W, PENS},
+    model::{Stroke, BRUSHES, BRUSH_SIZES, HIGHLIGHTER_SIZES, PAGE_H, PAGE_W, PENS, PEN_SIZES},
     render::{Box2, View, BACK, BLACK, GRAY, LINE, WHITE},
 };
 
@@ -435,9 +435,11 @@ pub fn selection_overlay(a: &mut App) {
 fn editor_tools(a: &mut App) {
     let h = a.surface.logical_h;
     let mut y = 104.;
+    let step = if h < 760. { 44. } else { 50. };
     for (icon, tool) in [
         (Icon::Pen, "pen"),
         (Icon::Highlighter, "highlighter"),
+        (Icon::Brush, "brush"),
         (Icon::Eraser, "eraser"),
         (Icon::Lasso, "lasso"),
         (Icon::Text, "text"),
@@ -447,11 +449,11 @@ fn editor_tools(a: &mut App) {
         icon_button(
             a,
             icon,
-            Box2::new(6., y, 56., 44.),
+            Box2::new(6., y, 56., step - 6.),
             Action::Tool(tool.into()),
             a.tool == tool,
         );
-        y += 50.;
+        y += step;
     }
     a.surface.fill(Box2::new(17., y + 5., 34., 1.), LINE);
     y += 12.;
@@ -497,6 +499,7 @@ pub fn action_label(action: &Action) -> Option<&str> {
         Action::Tool(t) => match t.as_str() {
             "pen" => "Pen",
             "highlighter" => "Highlighter",
+            "brush" => "Brushes",
             "eraser" => "Eraser",
             "lasso" => "Lasso",
             "select" => "Select",
@@ -919,71 +922,171 @@ fn menu_popup(a: &mut App, title: &str, items: &[(String, Action)]) {
     }
 }
 fn pen_popup(a: &mut App) {
-    let b = popover(a, "Pen", 368., 404., true);
-    text(a, "PEN TYPE", b.x + 16., b.y + 54., 11., GRAY, b.w - 32.);
-    let cw = (b.w - 40.) / 2.;
-    for (i, name) in PENS.iter().enumerate() {
-        let row = Box2::new(
-            b.x + 16. + (i % 2) as f64 * (cw + 8.),
-            b.y + 76. + (i / 2) as f64 * 48.,
-            cw,
-            42.,
+    let brush = a.tool == "brush";
+    let highlighter = a.tool == "highlighter";
+    let nib = a.active_nib().clone();
+    let title = if brush {
+        "Brushes"
+    } else if highlighter {
+        "Highlighter"
+    } else {
+        "Pen"
+    };
+    let b = popover(a, title, 368., if highlighter { 210. } else { 404. }, true);
+    if !highlighter {
+        text(
+            a,
+            if brush { "BRUSH TYPE" } else { "PEN TYPE" },
+            b.x + 16.,
+            b.y + 54.,
+            11.,
+            GRAY,
+            b.w - 32.,
         );
-        let selected = a.nib.pen == *name;
-        if selected {
-            a.surface.rounded(row, 4., BLACK);
+        let types: &[&str] = if brush { &BRUSHES } else { &PENS };
+        let cw = (b.w - 40.) / 2.;
+        for (i, name) in types.iter().enumerate() {
+            let row = Box2::new(
+                b.x + 16. + (i % 2) as f64 * (cw + 8.),
+                b.y + 76. + (i / 2) as f64 * 48.,
+                cw,
+                42.,
+            );
+            let selected = nib.pen == *name;
+            if selected {
+                a.surface.rounded(row, 4., BLACK);
+            }
+            a.hits.push((row, Action::Pen((*name).into())));
+            let ink = Stroke {
+                tool: if brush { "brush" } else { "pen" }.into(),
+                pen: (*name).into(),
+                width: if brush { 6. } else { 1.4 },
+                color: if selected { 1. } else { 0.07 },
+                points: (0..24)
+                    .map(|n| {
+                        [
+                            row.x + 8. + n as f64,
+                            row.y + 22. - (n as f64 / 10.).sin() * 4.,
+                            if brush {
+                                0.15 + 0.8 * n as f64 / 23.
+                            } else {
+                                0.5
+                            },
+                        ]
+                    })
+                    .collect(),
+                ..Stroke::default()
+            };
+            a.surface.stroke(
+                View {
+                    x: 0.,
+                    y: 0.,
+                    zoom: 1.,
+                    clip: row,
+                },
+                &ink,
+            );
+            a.surface.label(
+                name,
+                Box2::new(row.x + 40., row.y, row.w - 44., row.h),
+                a.prefs.ui_font_size.min(14.),
+                if selected { WHITE } else { BLACK },
+            );
         }
-        a.hits.push((row, Action::Pen((*name).into())));
-        let ink = Stroke {
-            pen: (*name).into(),
-            width: 1.4,
-            color: if selected { 1. } else { 0.07 },
-            points: (0..24)
-                .map(|n| {
-                    [
-                        row.x + 8. + n as f64,
-                        row.y + 22. - (n as f64 / 10.).sin() * 4.,
-                        0.5,
-                    ]
-                })
-                .collect(),
-            ..Stroke::default()
-        };
-        a.surface.stroke(
-            View {
-                x: 0.,
-                y: 0.,
-                zoom: 1.,
-                clip: row,
-            },
-            &ink,
-        );
-        a.surface.label(
-            name,
-            Box2::new(row.x + 40., row.y, row.w - 44., row.h),
-            a.prefs.ui_font_size.min(14.),
-            if selected { WHITE } else { BLACK },
-        );
-    }
-    a.surface
-        .fill(Box2::new(b.x + 16., b.y + 224., b.w - 32., 1.), LINE);
-    text(a, "THICKNESS", b.x + 16., b.y + 238., 11., GRAY, b.w - 32.);
-    let cw = (b.w - 48.) / 3.;
-    for (i, (value, label)) in [(1.4, "Fine"), (2.4, "Medium"), (4., "Bold")]
-        .iter()
-        .enumerate()
-    {
-        let row = Box2::new(b.x + 16. + i as f64 * (cw + 8.), b.y + 260., cw, 42.);
-        let color = button_chrome(a, row, Action::Width(*value), a.nib.width == *value);
-        let center = (row.x + 15., row.y + row.h / 2.);
+        if brush {
+            text(
+                a,
+                "Press harder for a wider stroke.",
+                b.x + 16.,
+                b.y + 186.,
+                13.,
+                GRAY,
+                b.w - 32.,
+            );
+        }
         a.surface
-            .line(center, center, value * 2., (color & 255) as f64 / 255.);
-        a.surface.label(
-            label,
-            Box2::new(row.x + 30., row.y, row.w - 34., row.h),
-            13.,
-            color,
+            .fill(Box2::new(b.x + 16., b.y + 224., b.w - 32., 1.), LINE);
+    }
+    let sizes: &[(f64, &str)] = if highlighter {
+        &HIGHLIGHTER_SIZES
+    } else if brush {
+        &BRUSH_SIZES
+    } else {
+        &PEN_SIZES
+    };
+    let y = if highlighter { 78. } else { 260. };
+    text(
+        a,
+        if highlighter { "WIDTH" } else { "THICKNESS" },
+        b.x + 16.,
+        b.y + y - 22.,
+        11.,
+        GRAY,
+        b.w - 32.,
+    );
+    let cw = (b.w - 32. - 8. * (sizes.len() - 1) as f64) / sizes.len() as f64;
+    for (i, (value, label)) in sizes.iter().enumerate() {
+        let row = Box2::new(
+            b.x + 16. + i as f64 * (cw + 8.),
+            b.y + y,
+            cw,
+            if highlighter { 64. } else { 42. },
         );
+        let color = button_chrome(a, row, Action::Width(*value), nib.width == *value);
+        if !brush && !highlighter {
+            let center = (row.x + 15., row.y + row.h / 2.);
+            a.surface
+                .line(center, center, value * 2., (color & 255) as f64 / 255.);
+            a.surface.label(
+                label,
+                Box2::new(row.x + 30., row.y, row.w - 34., row.h),
+                13.,
+                color,
+            );
+        } else {
+            let height = if highlighter {
+                value * 7. / 3.
+            } else {
+                (value / 2.).clamp(2., 14.)
+            };
+            if highlighter {
+                a.surface.rounded(
+                    Box2::new(row.x + 18., row.y + 18. - height / 2., row.w - 36., height),
+                    2.,
+                    color,
+                );
+            } else {
+                a.surface.line(
+                    (row.x + row.w / 2., row.y + 12.),
+                    (row.x + row.w / 2., row.y + 12.),
+                    height,
+                    (color & 255) as f64 / 255.,
+                );
+            }
+            a.surface.centered_label(
+                label,
+                Box2::new(
+                    row.x + 2.,
+                    row.y + if highlighter { 39. } else { 24. },
+                    row.w - 4.,
+                    16.,
+                ),
+                12.,
+                color,
+            );
+        }
+    }
+    if highlighter {
+        text(
+            a,
+            "Translucent ink keeps text visible.",
+            b.x + 16.,
+            b.y + 164.,
+            13.,
+            GRAY,
+            b.w - 32.,
+        );
+        return;
     }
     text(a, "COLOUR", b.x + 16., b.y + 320., 11., GRAY, b.w - 32.);
     let cw = (b.w - 56.) / 4.;
@@ -997,7 +1100,7 @@ fn pen_popup(a: &mut App) {
     .enumerate()
     {
         let row = Box2::new(b.x + 16. + i as f64 * (cw + 8.), b.y + 342., cw, 44.);
-        let selected = (a.nib.color - value).abs() < 0.02;
+        let selected = (nib.color - value).abs() < 0.02;
         a.surface
             .rounded(row, 4., if selected { BLACK } else { LINE });
         a.surface.rounded(

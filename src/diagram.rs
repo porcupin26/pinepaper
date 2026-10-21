@@ -156,7 +156,17 @@ pub fn anchors(stroke: &Stroke) -> Vec<Point> {
                 ResizeHandle::West,
             ]
         };
-    handles.iter().map(|h| h.point(b)).collect()
+    let mut points: Vec<_> = handles.iter().map(|h| h.point(b)).collect();
+    if shape(stroke) == Some(Shape::Diamond) {
+        // The diamond's sides are diagonal, so their midpoints are not the
+        // bounding box's edge centers (those are already the four vertices).
+        for i in 0..4 {
+            let p = points[i];
+            let q = points[(i + 1) % 4];
+            points.push([(p[0] + q[0]) / 2., (p[1] + q[1]) / 2., 0.5]);
+        }
+    }
+    points
 }
 pub fn with_endpoint(stroke: &Stroke, end: usize, point: Point) -> Option<Stroke> {
     let mut ends = endpoints(stroke)?;

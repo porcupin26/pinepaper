@@ -103,13 +103,13 @@ def main():
                     subprocess.run(['grim', str(output / 'pen-popup.png')], env=env, check=True)
                     click(650, 600)  # Dismiss outside; this must never ink the page.
                     assert len(json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])['strokes']) == 1
-                    point('move 34 376 936 702')
+                    point('move 34 387 936 702')
                     point('down')
                     time.sleep(.7)
                     subprocess.run(['grim', str(output / 'tool-label.png')], env=env, check=True)
                     point('up')
                     time.sleep(1.1)
-                    click(34, 376)  # Diagram palette.
+                    click(34, 387)  # Diagram palette.
                     subprocess.run(['grim', str(output / 'diagram-menu.png')], env=env, check=True)
                     click(340, 389)  # Arrow in the landscape popover's first row.
                     point('move 250 400 936 702')
@@ -129,7 +129,7 @@ def main():
                     assert abs(80 + ends[1][0]*zoom - 395) < .1, ends
                     assert abs(98 + ends[1][1]*zoom - 487) < .1, ends
                     subprocess.run(['grim', str(output / 'diagram.png')], env=env, check=True)
-                    click(34,426)  # Select, below Diagram.
+                    click(34,431)  # Select, below Diagram.
                     click(322,443)  # Select the arrow shaft.
                     subprocess.run(['grim',str(output / 'selected-arrow.png')],env=env,check=True)
                     original=payload['strokes'][-1]['points'][:2]
@@ -155,7 +155,7 @@ def main():
                     key('-M','ctrl','z','-m','ctrl')
                     restored=json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])['strokes'][-1]['points'][:2]
                     assert restored == edited
-                    click(34,376)
+                    click(34,387)
                     click(340,437)  # Rectangle, second row of the diagram palette.
                     point('move 550 300 936 702')
                     point('down')
@@ -164,7 +164,7 @@ def main():
                     time.sleep(.4)
                     rectangle=json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])['strokes'][-1]
                     assert rectangle['diagram_shape']=='Rectangle', rectangle
-                    click(34,426)
+                    click(34,431)
                     click(645,360)
                     pad=(max(rectangle['width']*4,1)+8)*zoom
                     hx,hy=round(740+pad),round(420+pad)
@@ -214,6 +214,34 @@ def main():
                     key('-k', 'Return')
                     assert db.execute('SELECT count(*) FROM documents').fetchone()[0] == 2
                     assert db.execute("SELECT count(*) FROM documents WHERE title='Draft żółć'").fetchone()[0] == 1
+                    click(34,211)  # Brushes, then its active icon opens the popover.
+                    click(34,211)
+                    subprocess.run(['grim',str(output/'brush-popup.png')],env=env,check=True)
+                    click(342,337)  # Dry brush.
+                    click(385,473)  # Wide.
+                    click(650,620)  # Outside dismiss, with no ink.
+                    point('move 500 420 936 702')
+                    point('down')
+                    for i in range(1,41): point(f'move {500+i*5} {420+i} 936 702')
+                    point('up')
+                    time.sleep(.4)
+                    current=lambda: json.loads(db.execute("SELECT payload FROM pages WHERE document=(SELECT id FROM documents WHERE title='Draft żółć')").fetchone()[0])['strokes']
+                    assert len(current())==1 and current()[0]['tool']=='brush', current()
+                    assert current()[0]['pen']=='Dry' and current()[0]['width']==28, current()
+                    click(34,167)  # Highlighter.
+                    for x,width,y in [(127,2,500),(385,9,570)]:
+                        click(34,167)
+                        subprocess.run(['grim',str(output/'highlighter-popup.png')],env=env,check=True)
+                        click(x,258)
+                        click(650,620)
+                        point(f'move 500 {y} 936 702')
+                        point('down')
+                        point(f'move 700 {y} 936 702')
+                        point('up')
+                        time.sleep(.4)
+                        assert current()[-1]['tool']=='highlighter' and current()[-1]['width']==width, current()
+                    assert len(current())==3
+                    subprocess.run(['grim',str(output/'brush-and-highlighters.png')],env=env,check=True)
                     key('-k', 'F11')
                     key('-k', 'F11')
                     key('-M', 'ctrl', 'q', '-m', 'ctrl')
@@ -221,7 +249,7 @@ def main():
                     db.close()
                 (output / 'result.json').write_text(json.dumps({'passed': True,
                     'checks': ['native Wayland launch', 'Notebook toolbar action opens drawing immediately', 'optional title rename', 'pointer ink persisted', 'pen popup and outside dismissal without ink',
-                               'hold tool label', 'diagram palette and curved gesture ending at release', 'Select and endpoint handles', 'move arrow body and undo', 'shape resize handles, fixed anchor, persistence and undo', 'magnet toggle, endpoint snap, release and undo', 'rotation', 'draft preserved across rotation', 'fullscreen', 'clean close']}, indent=2))
+                               'hold tool label', 'diagram palette and curved gesture ending at release', 'Select and endpoint handles', 'move arrow body and undo', 'shape resize handles, fixed anchor, persistence and undo', 'magnet toggle, endpoint snap, release and undo', 'brush popover, Dry brush and independent highlighter widths', 'rotation', 'draft preserved across rotation', 'fullscreen', 'clean close']}, indent=2))
                 print('Headless Wayland checks passed')
             finally:
                 if pointer:

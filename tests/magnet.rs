@@ -72,7 +72,7 @@ fn anchors_are_geometric_not_sampled_ink_or_arrowheads() {
         let anchors = diagram::anchors(&s);
         let n = match kind {
             Shape::Line | Shape::Arrow | Shape::DoubleArrow => 2,
-            Shape::Rectangle | Shape::Square => 8,
+            Shape::Rectangle | Shape::Square | Shape::Diamond => 8,
             _ => 4,
         };
         assert_eq!(anchors.len(), n);
@@ -261,4 +261,31 @@ fn page_limits_take_priority_and_hover_never_snaps() {
     motion(&mut a, [500., 500., 0.5]);
     assert_eq!(a.page().unwrap().payload, saved);
     assert!(a.snap_target.is_none());
+}
+
+#[test]
+fn every_polygon_side_midpoint_accepts_an_arrow_endpoint() {
+    for kind in [Shape::Rectangle, Shape::Square, Shape::Diamond] {
+        let target = shape(kind, (350., 300.), (550., 500.));
+        for edge in target.points.windows(2) {
+            let midpoint = [
+                (edge[0][0] + edge[1][0]) / 2.,
+                (edge[0][1] + edge[1][1]) / 2.,
+                0.5,
+            ];
+            let (_dir, mut a) = fixture(vec![
+                shape(Shape::Arrow, (100., 150.), (200., 200.)),
+                target.clone(),
+            ]);
+            a.act(Action::Magnet);
+            a.render();
+            tap(&mut a, [150., 175., 0.5]);
+            begin(&mut a, [200., 200., 0.5]);
+            release(&mut a, [midpoint[0] - 4., midpoint[1] + 3., 0.5]);
+            near(
+                diagram::endpoints(&a.page().unwrap().payload.strokes[0]).unwrap()[1],
+                midpoint,
+            );
+        }
+    }
 }

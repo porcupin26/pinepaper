@@ -19,7 +19,8 @@ No account is required.
   Tap the document title to rename it. Pen options and other context menus open
   in compact popovers over the page; tap outside to dismiss without leaving ink.
 - Six pen nibs (ballpoint, fineliner, marker, pencil, mechanical, calligraphy),
-  three weights and grayscale colours; highlighter, whole-stroke eraser, lasso
+  three weights and grayscale colours; four highlighter widths; Round, Flat, Soft
+  and Dry pressure-sensitive brushes in four sizes; whole-stroke eraser, lasso
   selection/movement/deletion, and editable typed notes.
 - Diagram palette: drag to create lines, arrows, double arrows, rectangles,
   squares, ellipses, circles and diamonds. Each shape is one selectable ink
@@ -92,6 +93,21 @@ width and height. Tap Diagram again to change the shape, line weight or colour.
 Lines and arrows connect the initial contact point to the final pen-up position;
 you can take a curved path while dragging. The preview follows the newest pen
 position, and lifting the pen fixes the endpoint there.
+
+Tap **Highlighter** or **Brushes** to select it, then tap its active icon again
+for a compact popover, just like Pen. **Highlighter** has Fine, Medium, Broad and
+Wide widths (14, 28, 42 and 63 page units). Its transparent shading does not darken
+when retracing within one stroke. Existing highlights keep their original width.
+
+**Brushes** has four styles: **Round** for solid tapered ink, **Flat** for an angled
+nib, **Soft** for shaded edges, and **Dry** for a textured stroke. All respond to
+pressure and offer Fine, Medium, Broad and Wide sizes plus grayscale colours.
+Pen, highlighter and brush preferences are saved independently. Brush marks use
+the same selection, movement, erasing, undo, saving, PDF export and sharing paths
+as handwriting. Both peers need 0.6.5 or newer to display brush textures alike.
+Brushes do not simulate wet paint or pen tilt. The left toolbar compacts in
+landscape so the new brush icon and Add page remain available.
+
 Tap **Select**, the pointer icon below Diagram, to select a shape, an ink stroke
 or a text object. Drag its body to move it; tap empty space to deselect. You can
 also select and move in one drag. Select works with the pen or a finger, even
@@ -114,9 +130,9 @@ shape. Tiny shapes omit crowded edge handles. Tap the body to move the shape.
 Tap the **magnet** (horseshoe) icon in the top toolbar to turn point snapping on
 or off. A black tile means on; it starts off and remembers your choice. With it
 on, moving a diagram with Select or a Lasso group attracts its connection points
-to nearby diagrams. Lines/arrows use their two endpoints; rectangles/squares use
-corners and edge midpoints; circles, ellipses and diamonds use their four outer
-points. Freehand ink and text are not snap targets. Groups retain their layout.
+to nearby diagrams. Lines/arrows use their two endpoints; rectangles, squares
+and diamonds use corners and the midpoint of each side; circles and ellipses use
+their four outer points. Freehand ink and text are not snap targets. Groups retain their layout.
 
 Endpoint edits and resize handles also snap, while the opposite endpoint or
 corner/edge stays fixed. Resize targets must be compatible with that fixed anchor
@@ -174,7 +190,7 @@ fullscreen; the preference is remembered.
 Alternative formats:
 
 - **AppImage:** from the same artifact, run `chmod +x PinePaper-*.AppImage`,
-  then `./PinePaper-0.6.4-x86_64.AppImage` (substitute `aarch64` on ARM).
+  then `./PinePaper-0.6.5-x86_64.AppImage` (substitute `aarch64` on ARM).
   If FUSE is unavailable, prefix the launch with `APPIMAGE_EXTRACT_AND_RUN=1`.
 - **Flatpak:** download the matching `flatpak-x86_64` or `flatpak-aarch64`
   artifact, verify its checksums, then run the commands below. The separate
@@ -186,7 +202,7 @@ Alternative formats:
 
 ```sh
 flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install --user ./PinePaper-0.6.4-x86_64.flatpak
+flatpak install --user ./PinePaper-0.6.5-x86_64.flatpak
 flatpak run eu.pinepaper.PinePaper.Rust
 ```
 
@@ -448,11 +464,11 @@ under `usr/share/licenses/pinepaper/third-party/`.
 Use the ARM64 Arch package on PineNote:
 
 ```sh
-sudo pacman -U pinepaper-0.6.4-1-aarch64.pkg.tar.zst
+sudo pacman -U pinepaper-0.6.5-1-aarch64.pkg.tar.zst
 ```
 
 The source `packaging/PKGBUILD` supports x86_64 and aarch64 after a matching
-`v0.6.4` tag exists. Before that tag exists, use Cargo/nFPM directly. For local
+`v0.6.5` tag exists. Before that tag exists, use Cargo/nFPM directly. For local
 package builds, install Python 3, binutils, curl, tar and zstd, then run:
 
 ```sh
@@ -517,3 +533,8 @@ packaging and project documentation belong in commits.
 
 Code is MIT licensed. Bundled DejaVu font licensing is in
 `assets/FONT-LICENSE.txt`.
+
+Version 0.6.5 also handles temporary Wayland socket backpressure and would-block
+reads without exiting. This fixes the “Resource temporarily unavailable” exit
+seen during fast arrow-endpoint dragging. A real display disconnect finishes and
+flushes the current gesture before the process exits.

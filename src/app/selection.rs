@@ -154,8 +154,7 @@ impl App {
                     .strokes
                     .iter()
                     .rposition(|s| {
-                        let radius =
-                            tolerance + s.width * if s.tool == "highlighter" { 3.5 } else { 1.5 };
+                        let radius = tolerance + s.max_radius();
                         s.points
                             .first()
                             .is_some_and(|&q| distance(p, q, q) <= radius)

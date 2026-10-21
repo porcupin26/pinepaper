@@ -147,6 +147,59 @@ fn smoke_test(output: PathBuf) -> Result<()> {
     )?;
     a.store.create("A room of one's own","book",None,pinepaper::document::paginate("A notebook makes room for an unfinished idea. Write it down, return to it, and let it grow.\n\nThe page stays quiet while your thoughts move.","A room of one's own"),None)?;
     a.reload_library()?;
+    let mut brush_demo = Payload::blank("Blank");
+    for (i, name) in pinepaper::model::BRUSHES.iter().enumerate() {
+        let y = 170. + i as f64 * 120.;
+        brush_demo.texts.push(Text {
+            text: format!("{name} brush"),
+            x: 50.,
+            y: y - 65.,
+            size: 22.,
+            font: "Sans".into(),
+            color: 0.07,
+            extra: Default::default(),
+        });
+        brush_demo.strokes.push(Stroke {
+            tool: "brush".into(),
+            pen: (*name).into(),
+            width: 28.,
+            color: 0.07,
+            points: (0..250)
+                .map(|n| {
+                    [
+                        80. + n as f64 * 2.4,
+                        y + (n as f64 / 30.).sin() * 18.,
+                        0.1 + 0.9 * n as f64 / 249.,
+                    ]
+                })
+                .collect(),
+            extra: Default::default(),
+        });
+    }
+    for (i, (width, label)) in pinepaper::model::HIGHLIGHTER_SIZES.iter().enumerate() {
+        let y = 710. + i as f64 * 70.;
+        brush_demo.strokes.push(Stroke {
+            width: *width,
+            points: vec![[80., y, 0.5], [680., y, 0.5]],
+            ..Stroke::highlighter()
+        });
+        brush_demo.texts.push(Text {
+            text: format!("{label} highlighter"),
+            x: 100.,
+            y: y - 14.,
+            size: 22.,
+            font: "Sans".into(),
+            color: 0.07,
+            extra: Default::default(),
+        });
+    }
+    let brush_id = a.store.create(
+        "Brushes and highlighters",
+        "notebook",
+        None,
+        vec![brush_demo],
+        None,
+    )?;
     for (w, h, label) in [(936, 702, "landscape"), (702, 936, "portrait")] {
         a.screen = Screen::Library;
         a.resize(w, h, 2);
@@ -172,6 +225,22 @@ fn smoke_test(output: PathBuf) -> Result<()> {
         a.render();
         a.surface
             .save_png(&output.join(format!("notebook-{label}.png")))?;
+        a.open(&brush_id)?;
+        a.fit = true;
+        a.render();
+        a.surface
+            .save_png(&output.join(format!("brush-samples-{label}.png")))?;
+        for (tool, name) in [("highlighter", "highlighter"), ("brush", "brush")] {
+            a.act(Action::Tool(tool.into()));
+            a.act(Action::PenPanel);
+            a.render();
+            a.surface
+                .save_png(&output.join(format!("{name}-menu-{label}.png")))?;
+            a.act(Action::Close);
+        }
+        a.fit = false;
+        a.open(&id)?;
+        a.render();
         a.act(Action::Tool("diagram".into()));
         a.render();
         a.surface

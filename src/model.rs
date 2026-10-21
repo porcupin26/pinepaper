@@ -24,6 +24,13 @@ pub const PENS: [&str; 6] = [
     "Mechanical",
     "Calligraphy",
 ];
+pub const BRUSHES: [&str; 4] = ["Round", "Flat", "Soft", "Dry"];
+pub const BRUSH_SIZES: [(f64, &str); 4] =
+    [(3., "Fine"), (8., "Medium"), (16., "Broad"), (28., "Wide")];
+// Keep the historical highlighter width multiplier for saved document compatibility.
+pub const HIGHLIGHTER_SIZES: [(f64, &str); 4] =
+    [(2., "Fine"), (4., "Medium"), (6., "Broad"), (9., "Wide")];
+pub const PEN_SIZES: [(f64, &str); 3] = [(1.4, "Fine"), (2.4, "Medium"), (4., "Bold")];
 pub type Point = [f64; 3];
 fn pen() -> String {
     "Fineliner".into()
@@ -70,6 +77,41 @@ impl Default for Stroke {
             color: color(),
             points: vec![],
             extra: BTreeMap::new(),
+        }
+    }
+}
+impl Stroke {
+    pub fn brush() -> Self {
+        Self {
+            tool: "brush".into(),
+            pen: "Round".into(),
+            width: 8.,
+            ..Self::default()
+        }
+    }
+    pub fn highlighter() -> Self {
+        Self {
+            tool: "highlighter".into(),
+            width: 4.,
+            ..Self::default()
+        }
+    }
+    /// Conservative geometric radius for selection and erasing, in page units.
+    pub fn max_radius(&self) -> f64 {
+        if self.tool == "highlighter" {
+            (self.width * 7.).max(14.) / 2.
+        } else if self.tool == "brush" {
+            self.width * 1.75 / 2.
+        } else {
+            self.width
+                * match self.pen.as_str() {
+                    "Mechanical" => 0.35,
+                    "Marker" => 1.25,
+                    "Ballpoint" => 0.75,
+                    "Pencil" => 0.7,
+                    "Calligraphy" => 1.875,
+                    _ => 0.5,
+                }
         }
     }
 }
@@ -696,7 +738,7 @@ pub fn inside(p: Point, polygon: &[Point]) -> bool {
 pub fn erase(p: &mut Payload, a: Point, b: Point) -> bool {
     let before = p.strokes.len();
     p.strokes.retain(|s| {
-        let r = 10. + s.width / 2.;
+        let r = 10. + s.max_radius();
         if s.points.iter().any(|&p| distance(p, a, b) <= r) {
             return false;
         }

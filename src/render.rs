@@ -367,13 +367,32 @@ impl Surface {
             _ => 1.,
         };
         let highlight = stroke.tool == "highlighter";
+        let brush = stroke.tool == "brush";
         let width = if highlight {
             (stroke.width * 7.).max(14.)
         } else {
             stroke.width * mult
         };
-        let r = (width * v.zoom * self.scale / 2.).max(0.35);
-        let opacity = if highlight {
+        // Brush pressure tapers continuously between samples; the maximum radius
+        // still bounds the existing fast scanline path conservatively.
+        let brush_radius = |p: f64| {
+            (stroke.width * (0.25 + 1.5 * p.clamp(0.08, 1.)) * v.zoom * self.scale / 2.).max(0.35)
+        };
+        let (ra, rb) = if brush {
+            (brush_radius(a[2]), brush_radius(b[2]))
+        } else {
+            let r = (width * v.zoom * self.scale / 2.).max(0.35);
+            (r, r)
+        };
+        let r = ra.max(rb);
+        let flat = brush && stroke.pen == "Flat";
+        let soft = brush && stroke.pen == "Soft";
+        let dry = brush && stroke.pen == "Dry";
+        let opacity = if soft {
+            0.65
+        } else if dry {
+            0.9
+        } else if highlight {
             0.19
         } else if stroke.pen == "Pencil" {
             0.72
@@ -396,7 +415,20 @@ impl Surface {
         // Per-stroke coverage prevents translucent ink darkening at every input sample.
         let dx = b[0] - a[0];
         let dy = b[1] - a[1];
-        let dd = dx * dx + dy * dy;
+        // A flat brush sweeps a fixed 45-degree elliptical nib. Project in its
+        // local metric so diagonals and direction changes keep a continuous edge.
+        let metric = |x: f64, y: f64| {
+            if flat {
+                (
+                    (x + y) * std::f64::consts::FRAC_1_SQRT_2,
+                    (y - x) * std::f64::consts::FRAC_1_SQRT_2 / 0.28,
+                )
+            } else {
+                (x, y)
+            }
+        };
+        let (mx, my) = metric(dx, dy);
+        let dd = mx * mx + my * my;
         for y in bounds.y..bounds.bottom {
             // Intersect this row with the segment's antialiased capsule. A long
             // diagonal must visit pixels near the ink, not its entire rectangle.
@@ -424,14 +456,36 @@ impl Surface {
                 (bounds.x, bounds.right)
             };
             for x in left..right {
+                let (px, py) = metric(x as f64 + 0.5 - a[0], y as f64 + 0.5 - a[1]);
                 let t = if dd > 0. {
-                    (((x as f64 + 0.5 - a[0]) * dx + (y as f64 + 0.5 - a[1]) * dy) / dd)
-                        .clamp(0., 1.)
+                    ((px * mx + py * my) / dd).clamp(0., 1.)
                 } else {
                     0.
                 };
-                let dist = (x as f64 + 0.5 - a[0] - t * dx).hypot(y as f64 + 0.5 - a[1] - t * dy);
-                let alpha = ((r + 0.5 - dist).clamp(0., 1.) * 255.) as u8;
+                let dist = (px - t * mx).hypot(py - t * my);
+                let radius = ra + (rb - ra) * t;
+                let mut coverage = (radius + 0.5 - dist).clamp(0., 1.);
+                if soft {
+                    let falloff = (1. - (dist / radius).powi(2)).max(0.);
+                    coverage *= falloff * falloff;
+                } else if dry && coverage > 0. {
+                    // Stable paper-space grain: no event-rate randomness, and the
+                    // same pattern after a repaint, reload or PDF export.
+                    let gx = (((x as f64 + 0.5) / self.scale - v.x) / v.zoom * 1.8).floor() as i64;
+                    let gy = (((y as f64 + 0.5) / self.scale - v.y) / v.zoom * 1.8).floor() as i64;
+                    let mut hash = (gx as u64).wrapping_mul(0x9e3779b185ebca87)
+                        ^ (gy as u64).wrapping_mul(0xc2b2ae3d27d4eb4f);
+                    // Avalanche both coordinates; a simple xor leaves visible rows
+                    // and checkerboards in broad strokes.
+                    hash ^= hash >> 30;
+                    hash = hash.wrapping_mul(0xbf58476d1ce4e5b9);
+                    hash ^= hash >> 27;
+                    hash = hash.wrapping_mul(0x94d049bb133111eb);
+                    hash ^= hash >> 31;
+                    let grain = (hash & 255) as f64 / 255.;
+                    coverage *= ((grain - 0.22) / 0.78).clamp(0., 1.);
+                }
+                let alpha = (coverage * 255.) as u8;
                 if alpha == 0 {
                     continue;
                 }
@@ -843,8 +897,20 @@ mod tests {
                 };
                 let s = Stroke {
                     width: [0.3, 2.4, 8., 22.][i % 4],
-                    pen: ["Fineliner", "Ballpoint", "Pencil", "Calligraphy"][i % 4].into(),
-                    tool: if i % 5 == 0 { "highlighter" } else { "pen" }.into(),
+                    pen: if i % 3 == 0 {
+                        crate::model::BRUSHES[(i / 3) % 4]
+                    } else {
+                        ["Fineliner", "Ballpoint", "Pencil", "Calligraphy"][i % 4]
+                    }
+                    .into(),
+                    tool: if i % 3 == 0 {
+                        "brush"
+                    } else if i % 5 == 0 {
+                        "highlighter"
+                    } else {
+                        "pen"
+                    }
+                    .into(),
                     color: 0.3,
                     ..Stroke::default()
                 };

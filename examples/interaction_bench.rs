@@ -105,6 +105,33 @@ fn main() -> anyhow::Result<()> {
         });
         app.up(p[0], p[1]);
     }
+    for (tool, pen, width) in
+        BRUSHES
+            .into_iter()
+            .map(|pen| ("brush", pen, 28.))
+            .chain([("highlighter", "Fineliner", 9.)])
+    {
+        app.act(Action::Tool(tool.into()));
+        if tool == "brush" {
+            app.act(Action::Pen(pen.into()));
+        }
+        app.act(Action::Width(width));
+        app.act(Action::Close);
+        app.pages[0].payload = Payload::blank("Blank");
+        app.redraw = true;
+        app.render();
+        let p = app.view.screen([80., 400., 0.1]);
+        app.down(p[0], p[1], 0.1, false);
+        measure(&mut app, &format!("{tool}/{pen} wide"), false, |i| {
+            [
+                80. + i as f64 * 5.,
+                400. + (i as f64 * 0.2).sin() * 30.,
+                0.1 + 0.9 * i as f64 / 99.,
+            ]
+        });
+        let p = app.view.screen([575., 400., 1.]);
+        app.up(p[0], p[1]);
+    }
     app.saver.flush()?;
     Ok(())
 }
@@ -113,7 +140,7 @@ fn measure(app: &mut App, action: &str, crowded: bool, point: impl Fn(usize) -> 
     for i in 0..100 {
         let p = app.view.screen(point(i));
         let start = Instant::now();
-        app.motion(p[0], p[1], 0.5);
+        app.motion(p[0], p[1], p[2]);
         app.render();
         times.push(start.elapsed().as_secs_f64() * 1000.);
     }

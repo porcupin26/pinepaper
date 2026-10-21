@@ -387,6 +387,8 @@ pub struct App {
     pub page_selection: Option<std::collections::BTreeSet<String>>,
     pub tool_tip: Option<(Box2, String)>,
     pub nib: Stroke,
+    pub highlighter: Stroke,
+    pub brush: Stroke,
     pub scroll: f64,
     pub fit: bool,
     pub view: View,
@@ -547,6 +549,8 @@ impl App {
             page_selection: None,
             tool_tip: None,
             nib: Stroke::default(),
+            highlighter: Stroke::highlighter(),
+            brush: Stroke::brush(),
             scroll: 0.,
             fit: false,
             view: View {
@@ -600,8 +604,31 @@ impl App {
             quit_after_settings: false,
         };
         app.nib = app.store.setting("pen", Stroke::default());
+        app.highlighter = app.store.setting("highlighter", Stroke::highlighter());
+        app.brush = app.store.setting("brush", Stroke::brush());
         app.reload_library()?;
         Ok(app)
+    }
+    pub fn active_nib(&self) -> &Stroke {
+        match self.tool.as_str() {
+            "highlighter" => &self.highlighter,
+            "brush" => &self.brush,
+            _ => &self.nib,
+        }
+    }
+    fn set_active_nib(&mut self, nib: Stroke) -> Result<()> {
+        let key = match self.tool.as_str() {
+            "highlighter" => "highlighter",
+            "brush" => "brush",
+            _ => "pen",
+        };
+        self.store.set(key, &nib)?;
+        match key {
+            "highlighter" => self.highlighter = nib,
+            "brush" => self.brush = nib,
+            _ => self.nib = nib,
+        }
+        Ok(())
     }
     pub fn page(&self) -> Option<&Page> {
         self.pages.get(self.index)
@@ -1058,7 +1085,7 @@ impl App {
                     self.tool = t;
                     self.selection = Selection::default();
                     self.dialog = Some(Dialog::DiagramPanel);
-                } else if self.tool == t && t == "pen" {
+                } else if self.tool == t && matches!(t.as_str(), "pen" | "highlighter" | "brush") {
                     self.action(Action::PenPanel)?;
                 } else {
                     self.tool = t;
@@ -1081,16 +1108,27 @@ impl App {
                 self.dialog = None;
             }
             Action::Pen(p) => {
-                self.nib.pen = p;
-                self.store.set("pen", &self.nib)?;
+                let mut nib = self.active_nib().clone();
+                let types: &[&str] = if self.tool == "brush" {
+                    &BRUSHES
+                } else {
+                    &PENS
+                };
+                anyhow::ensure!(types.contains(&p.as_str()), "Unknown nib type");
+                nib.pen = p;
+                self.set_active_nib(nib)?;
             }
             Action::Width(w) => {
-                self.nib.width = w;
-                self.store.set("pen", &self.nib)?;
+                anyhow::ensure!((0.1..=100.).contains(&w), "Invalid stroke width");
+                let mut nib = self.active_nib().clone();
+                nib.width = w;
+                self.set_active_nib(nib)?;
             }
             Action::Color(c) => {
-                self.nib.color = c;
-                self.store.set("pen", &self.nib)?;
+                anyhow::ensure!((0. ..=1.).contains(&c), "Invalid ink colour");
+                let mut nib = self.active_nib().clone();
+                nib.color = c;
+                self.set_active_nib(nib)?;
             }
             Action::Undo | Action::Redo => {
                 if self.sharing.as_ref().is_some_and(|s| s.replica.is_some()) {
@@ -1346,7 +1384,7 @@ impl App {
                 self.dialog = Some(
                     Dialog::Message(
                         "PinePaper · Rust".into(),
-                        "Pen: write on contact. Tap active Pen for nib settings. Hold a toolbar icon to see its name. Select: tap an object and drag its body to move it. Drag either circular handle on a selected line or arrow to move that endpoint. Drag corner or edge handles on other diagram shapes to resize them; circles and squares keep their proportions. Magnet: toggle the horseshoe icon to snap diagram endpoints and shape connection points when moving or resizing. Lasso: surround several objects, then drag them. Diagram: pick a shape, then drag on the page. Quick sheets: Page overview → Make notebook moves selected pages into a named notebook. Fingers scroll; palm gestures are suppressed near the pen.\n\nNotes save automatically after each stroke. Import PDF, EPUB and text from My files. Export PDF or back up the entire library as ZIP.\n\nF11 fullscreen · Ctrl+N new · Ctrl+O import · Ctrl+Z undo · Ctrl+Shift+Z redo · Page Up/Down · Escape tools · Ctrl+Q quit"
+                        "Pen: write on contact. Tap active Pen, Highlighter or Brushes for its settings. Brushes: Round, Flat, Soft and Dry, with four sizes and grayscale colours. Highlighter: four widths. Each tool remembers its own settings. Hold a toolbar icon to see its name. Select: tap an object and drag its body to move it. Drag either circular handle on a selected line or arrow to move that endpoint. Drag corner or edge handles on other diagram shapes to resize them; circles and squares keep their proportions. Magnet: toggle the horseshoe icon to snap diagram endpoints and shape connection points when moving or resizing. Lasso: surround several objects, then drag them. Diagram: pick a shape, then drag on the page. Quick sheets: Page overview → Make notebook moves selected pages into a named notebook. Fingers scroll; palm gestures are suppressed near the pen.\n\nNotes save automatically after each stroke. Import PDF, EPUB and text from My files. Export PDF or back up the entire library as ZIP.\n\nF11 fullscreen · Ctrl+N new · Ctrl+O import · Ctrl+Z undo · Ctrl+Shift+Z redo · Page Up/Down · Escape tools · Ctrl+Q quit"
                             .into(),
                     ),
                 );
@@ -2139,9 +2177,9 @@ impl App {
         let p = self.view.world(x, y, pressure);
         self.surface.begin_stroke();
         match self.tool.as_str() {
-            "pen" | "highlighter" => {
+            "pen" | "highlighter" | "brush" => {
                 self.push();
-                let mut s = self.nib.clone();
+                let mut s = self.active_nib().clone();
                 s.tool = self.tool.clone();
                 s.points = vec![p];
                 let r = self.surface.segment(self.view, p, p, &s);
