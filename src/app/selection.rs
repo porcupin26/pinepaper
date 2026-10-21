@@ -23,6 +23,8 @@ pub(super) struct ObjectEdit {
     pub background: Option<SurfaceSnapshot>,
     first_stroke: usize,
     first_text: usize,
+    magnet: magnet::Magnet,
+    anchors: Vec<Point>,
 }
 
 impl App {
@@ -184,6 +186,7 @@ impl App {
     }
     fn start_object_edit(&mut self, p: Point, kind: EditKind) {
         self.selection_bounds();
+        self.snap_target = None;
         self.redraw = true;
         let Some(bounds) = self.selection.bounds else {
             self.gesture = Some(Gesture::SelectEmpty);
@@ -191,6 +194,27 @@ impl App {
         };
         if let Some(page) = self.page() {
             self.gesture = Some(Gesture::ObjectEdit(Box::new(ObjectEdit {
+                magnet: magnet::Magnet::new(if self.magnet {
+                    page.payload
+                        .strokes
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| !self.selection.strokes.contains(i))
+                        .flat_map(|(_, s)| diagram::anchors(s))
+                        .collect()
+                } else {
+                    vec![]
+                }),
+                anchors: if self.magnet {
+                    self.selection
+                        .strokes
+                        .iter()
+                        .filter_map(|&i| page.payload.strokes.get(i))
+                        .flat_map(diagram::anchors)
+                        .collect()
+                } else {
+                    vec![]
+                },
                 original: page.payload.clone(),
                 start: p,
                 kind,
@@ -225,6 +249,7 @@ impl App {
         }
         edit.dragging = true;
         let old = self.selection_region();
+        self.snap_target = None;
         let Some(page) = self.pages.get_mut(self.index) else {
             return;
         };
@@ -239,13 +264,22 @@ impl App {
                     edit.original.strokes.get(stroke),
                     page.payload.strokes.get_mut(stroke),
                 ) {
-                    let next = handle.resized(
+                    let mut next = handle.resized(
                         bounds,
                         p[0] - edit.start[0],
                         p[1] - edit.start[1],
                         uniform,
                         4. / self.view.zoom,
                     );
+                    if let Some((snapped, target)) =
+                        edit.magnet
+                            .snap(&[handle.point(next)], self.view.zoom, |_, q| {
+                                magnet::resized_to(handle, bounds, q, uniform, 4. / self.view.zoom)
+                            })
+                    {
+                        next = snapped;
+                        self.snap_target = Some(target);
+                    }
                     if let Some(updated) = diagram::with_bounds(original, next) {
                         *target = updated;
                     }
@@ -253,8 +287,26 @@ impl App {
             }
             EditKind::Move => {
                 let b = edit.bounds;
-                let dx = (p[0] - edit.start[0]).clamp((-b.x).min(0.), (PAGE_W - b.x - b.w).max(0.));
-                let dy = (p[1] - edit.start[1]).clamp((-b.y).min(0.), (PAGE_H - b.y - b.h).max(0.));
+                let xr = ((-b.x).min(0.), (PAGE_W - b.x - b.w).max(0.));
+                let yr = ((-b.y).min(0.), (PAGE_H - b.y - b.h).max(0.));
+                let mut dx = (p[0] - edit.start[0]).clamp(xr.0, xr.1);
+                let mut dy = (p[1] - edit.start[1]).clamp(yr.0, yr.1);
+                let sources: Vec<_> = edit
+                    .anchors
+                    .iter()
+                    .map(|q| [q[0] + dx, q[1] + dy, 0.5])
+                    .collect();
+                if let Some(((x, y), target)) =
+                    edit.magnet.snap(&sources, self.view.zoom, |i, q| {
+                        let x = q[0] - edit.anchors[i][0];
+                        let y = q[1] - edit.anchors[i][1];
+                        (x >= xr.0 && x <= xr.1 && y >= yr.0 && y <= yr.1).then_some((x, y))
+                    })
+                {
+                    dx = x;
+                    dy = y;
+                    self.snap_target = Some(target);
+                }
                 for &i in &self.selection.strokes {
                     if let (Some(target), Some(original)) = (
                         page.payload.strokes.get_mut(i),
@@ -279,11 +331,20 @@ impl App {
                 if let Some(original) = edit.original.strokes.get(stroke) {
                     if let Some(ends) = diagram::endpoints(original) {
                         // Preserve where inside the handle the user grabbed it; no jump on contact.
-                        let q = [
+                        let mut q = [
                             (ends[end][0] + p[0] - edit.start[0]).clamp(0., PAGE_W),
                             (ends[end][1] + p[1] - edit.start[1]).clamp(0., PAGE_H),
                             0.5,
                         ];
+                        if let Some((snapped, target)) =
+                            edit.magnet.snap(&[q], self.view.zoom, |_, q| {
+                                (magnet::distance(q, ends[1 - end]) * self.view.zoom >= 2.)
+                                    .then_some(q)
+                            })
+                        {
+                            q = snapped;
+                            self.snap_target = Some(target);
+                        }
                         if (q[0] - ends[1 - end][0]).hypot(q[1] - ends[1 - end][1]) * self.view.zoom
                             >= 2.
                         {
@@ -298,6 +359,9 @@ impl App {
             }
         }
         self.selection_bounds();
+        self.repaint_object_edit(edit, old);
+    }
+    pub(super) fn repaint_object_edit(&mut self, edit: &mut ObjectEdit, old: Option<Box2>) {
         if !self.redraw {
             if let (Some(old), Some(new)) = (old, self.selection_region()) {
                 let x = old.x.min(new.x);
@@ -332,7 +396,7 @@ impl App {
             }
         }
     }
-    fn selection_region(&self) -> Option<Box2> {
+    pub(super) fn selection_region(&self) -> Option<Box2> {
         let b = self.selection.bounds?;
         let v = self.view;
         // Extra display-space padding covers endpoint handles at every zoom level.

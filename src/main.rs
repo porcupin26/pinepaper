@@ -237,6 +237,50 @@ fn smoke_test(output: PathBuf) -> Result<()> {
             .save_png(&output.join(format!("resized-shape-{label}.png")))?;
         a.act(Action::Undo);
         a.act(Action::Undo);
+        // Snap preview and release in both orientations, using the normal input path.
+        for (shape, from, to) in [
+            (
+                pinepaper::diagram::Shape::Rectangle,
+                [500., 380., 0.5],
+                [650., 500., 0.5],
+            ),
+            (
+                pinepaper::diagram::Shape::Arrow,
+                [180., 440., 0.5],
+                [400., 440., 0.5],
+            ),
+        ] {
+            a.act(Action::Shape(shape));
+            a.render();
+            let p = a.view.screen(from);
+            let q = a.view.screen(to);
+            a.down(p[0], p[1], 0.5, false);
+            a.up(q[0], q[1]);
+        }
+        a.act(Action::Tool("select".into()));
+        a.act(Action::Magnet);
+        a.render();
+        let p = a.view.screen([290., 440., 0.5]);
+        a.down(p[0], p[1], 0.5, false);
+        a.up(p[0], p[1]);
+        a.render();
+        let p = a.view.screen([400., 440., 0.5]);
+        let q = a.view.screen([495., 442., 0.5]);
+        a.down(p[0], p[1], 0.5, false);
+        a.render();
+        a.motion(q[0], q[1], 0.5);
+        a.render();
+        anyhow::ensure!(a.snap_target.is_some(), "Magnet preview did not snap");
+        a.surface
+            .save_png(&output.join(format!("magnet-active-{label}.png")))?;
+        a.up(q[0], q[1]);
+        a.render();
+        a.surface
+            .save_png(&output.join(format!("magnet-released-{label}.png")))?;
+        a.act(Action::Undo);
+        a.act(Action::Undo);
+        a.act(Action::Undo);
+        a.act(Action::Magnet);
         a.store.set("quick_sheets", &Some(&id))?;
         a.act(Action::MakeNotebook);
         a.act(Action::SelectPages(true));

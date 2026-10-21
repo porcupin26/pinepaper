@@ -28,6 +28,7 @@ pub enum Icon {
     Text,
     Diagram,
     Select,
+    Magnet,
     Undo,
     Redo,
     Download,
@@ -66,6 +67,14 @@ impl Icon {
             mirror: matches!(self, Self::Next | Self::Redo),
         };
         match self {
+            Self::Magnet => {
+                p.path(&[(3., 13.), (3., 3.), (8., 3.), (8., 13.)]);
+                p.arc((12., 13.), (4., 4.), 0., PI);
+                p.path(&[(16., 13.), (16., 3.), (21., 3.), (21., 13.)]);
+                p.arc((12., 13.), (9., 9.), 0., PI);
+                p.path(&[(3., 8.), (8., 8.)]);
+                p.path(&[(16., 8.), (21., 8.)]);
+            }
             Self::Select => {
                 p.path(&[
                     (5., 2.),

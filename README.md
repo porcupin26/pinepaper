@@ -111,6 +111,20 @@ Handles have the same screen size at every zoom, including in portrait mode.
 Resizing stops at the page edge and a small minimum size instead of flipping the
 shape. Tiny shapes omit crowded edge handles. Tap the body to move the shape.
 
+Tap the **magnet** (horseshoe) icon in the top toolbar to turn point snapping on
+or off. A black tile means on; it starts off and remembers your choice. With it
+on, moving a diagram with Select or a Lasso group attracts its connection points
+to nearby diagrams. Lines/arrows use their two endpoints; rectangles/squares use
+corners and edge midpoints; circles, ellipses and diamonds use their four outer
+points. Freehand ink and text are not snap targets. Groups retain their layout.
+
+Endpoint edits and resize handles also snap, while the opposite endpoint or
+corner/edge stays fixed. Resize targets must be compatible with that fixed anchor
+and, for circles/squares, equal dimensions. A bullseye marks the snapped point
+while dragging. Move farther away to release it, or turn the magnet off for free
+placement. The attraction radius stays the same on screen at every zoom. These
+are placement snaps; moving a shape later does not pull attached arrows with it.
+
 Use **Lasso** to surround and move several objects together. Delete selection or
 the eraser removes objects, and Undo/Redo reverses edits. Changes save on release
 and work in PDF exports and live sharing. Object drags repaint the affected page
@@ -160,7 +174,7 @@ fullscreen; the preference is remembered.
 Alternative formats:
 
 - **AppImage:** from the same artifact, run `chmod +x PinePaper-*.AppImage`,
-  then `./PinePaper-0.6.3-x86_64.AppImage` (substitute `aarch64` on ARM).
+  then `./PinePaper-0.6.4-x86_64.AppImage` (substitute `aarch64` on ARM).
   If FUSE is unavailable, prefix the launch with `APPIMAGE_EXTRACT_AND_RUN=1`.
 - **Flatpak:** download the matching `flatpak-x86_64` or `flatpak-aarch64`
   artifact, verify its checksums, then run the commands below. The separate
@@ -172,7 +186,7 @@ Alternative formats:
 
 ```sh
 flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install --user ./PinePaper-0.6.3-x86_64.flatpak
+flatpak install --user ./PinePaper-0.6.4-x86_64.flatpak
 flatpak run eu.pinepaper.PinePaper.Rust
 ```
 
@@ -434,11 +448,11 @@ under `usr/share/licenses/pinepaper/third-party/`.
 Use the ARM64 Arch package on PineNote:
 
 ```sh
-sudo pacman -U pinepaper-0.6.3-1-aarch64.pkg.tar.zst
+sudo pacman -U pinepaper-0.6.4-1-aarch64.pkg.tar.zst
 ```
 
 The source `packaging/PKGBUILD` supports x86_64 and aarch64 after a matching
-`v0.6.3` tag exists. Before that tag exists, use Cargo/nFPM directly. For local
+`v0.6.4` tag exists. Before that tag exists, use Cargo/nFPM directly. For local
 package builds, install Python 3, binutils, curl, tar and zstd, then run:
 
 ```sh

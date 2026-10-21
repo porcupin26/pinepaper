@@ -355,19 +355,20 @@ fn editor(a: &mut App) {
         let title = a.doc.as_ref().map(|d| d.title.clone()).unwrap_or_default();
         a.surface.label(
             &title,
-            Box2::new(66., 42., (w - 418.).max(80.), 42.),
+            Box2::new(66., 42., (w - 468.).max(80.), 42.),
             18.,
             BLACK,
         );
         if let Some(d) = &a.doc {
             a.hits.push((
-                Box2::new(66., 42., (w - 418.).max(80.), 42.),
+                Box2::new(66., 42., (w - 468.).max(80.), 42.),
                 Action::Rename(d.id.clone()),
             ));
         }
         let mark = a.page().is_some_and(|p| p.bookmarked);
-        let mut x = w - 332.;
+        let mut x = w - 382.;
         for (icon, bw, act, sel) in [
+            (Icon::Magnet, 42., Action::Magnet, a.magnet),
             (Icon::Bookmark, 42., Action::Bookmark, mark),
             (Icon::Grid, 66., Action::Overview, false),
             (fullscreen_icon(a), 54., Action::Fullscreen, false),
@@ -419,6 +420,15 @@ pub fn selection_overlay(a: &mut App) {
             .rounded(Box2::new(q[0] - 7., q[1] - 7., 14., 14.), 7., BLACK);
         a.surface
             .rounded(Box2::new(q[0] - 5., q[1] - 5., 10., 10.), 5., WHITE);
+    }
+    if let Some(p) = a.snap_target {
+        let q = v.screen(p);
+        a.surface
+            .rounded(Box2::new(q[0] - 11., q[1] - 11., 22., 22.), 11., BLACK);
+        a.surface
+            .rounded(Box2::new(q[0] - 9., q[1] - 9., 18., 18.), 9., WHITE);
+        a.surface
+            .rounded(Box2::new(q[0] - 3., q[1] - 3., 6., 6.), 3., BLACK);
     }
     a.surface.clip = old;
 }
@@ -498,6 +508,7 @@ pub fn action_label(action: &Action) -> Option<&str> {
         Action::Redo => "Redo",
         Action::DeleteSelection => "Delete selection",
         Action::AddPage => "Add page",
+        Action::Magnet => "Magnet snapping on / off",
         Action::Bookmark => "Bookmark page",
         Action::Overview => "Page overview",
         Action::Tools => "Show / hide tools",

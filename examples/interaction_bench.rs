@@ -12,10 +12,17 @@ fn main() -> anyhow::Result<()> {
     let mut app = App::new(dir.path().into())?;
     app.resize(702, 936, 2);
     app.act(Action::New("notebook".into()));
+    app.act(Action::Magnet);
     for crowded in [false, true] {
         app.pages[0].payload = Payload::blank("Grid");
         if crowded {
             for row in 0..80 {
+                app.pages[0].payload.strokes.push(Shape::Rectangle.stroke(
+                    [20., 100. + row as f64 * 10., 0.5],
+                    [60., 108. + row as f64 * 10., 0.5],
+                    1.,
+                    0.3,
+                ));
                 app.pages[0].payload.strokes.push(Stroke {
                     points: (0..120)
                         .map(|n| {
@@ -112,7 +119,7 @@ fn measure(app: &mut App, action: &str, crowded: bool, point: impl Fn(usize) -> 
     }
     times.sort_by(f64::total_cmp);
     println!(
-        "{action} crowded={crowded}: median={:.2}ms p95={:.2}ms",
-        times[50], times[95]
+        "{action} magnet={} crowded={crowded}: median={:.2}ms p95={:.2}ms",
+        app.magnet, times[50], times[95]
     );
 }

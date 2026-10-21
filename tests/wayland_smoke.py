@@ -184,6 +184,23 @@ def main():
                     subprocess.run(['grim',str(output/'resized-shape.png')],env=env,check=True)
                     key('-M','ctrl','z','-m','ctrl')
                     assert json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])['strokes'][-1]==rectangle
+                    click(375,475)  # Select the edited arrow again.
+                    click(575,65)  # Magnet: same tool and selection, now snapping on.
+                    point('move 500 550 936 702')
+                    point('down')
+                    point('move 545 363 936 702')
+                    time.sleep(.2)
+                    subprocess.run(['grim',str(output/'magnet-active.png')],env=env,check=True)
+                    point('up')
+                    time.sleep(.4)
+                    snapped=json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])['strokes'][1]['points'][:2]
+                    assert snapped[0] == edited[0], (snapped,edited)
+                    assert abs(80+snapped[1][0]*zoom-550)<.1, snapped
+                    assert abs(98+snapped[1][1]*zoom-360)<.1, snapped
+                    subprocess.run(['grim',str(output/'magnet-released.png')],env=env,check=True)
+                    key('-M','ctrl','z','-m','ctrl')
+                    assert json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])['strokes'][1]['points'][:2] == edited
+                    click(575,65)  # Turn snapping off again.
                     sway('output HEADLESS-1 transform 90')
                     time.sleep(.5)
                     subprocess.run(['grim', str(output / 'portrait.png')], env=env, check=True)
@@ -204,7 +221,7 @@ def main():
                     db.close()
                 (output / 'result.json').write_text(json.dumps({'passed': True,
                     'checks': ['native Wayland launch', 'Notebook toolbar action opens drawing immediately', 'optional title rename', 'pointer ink persisted', 'pen popup and outside dismissal without ink',
-                               'hold tool label', 'diagram palette and curved gesture ending at release', 'Select and endpoint handles', 'move arrow body and undo', 'shape resize handles, fixed anchor, persistence and undo', 'rotation', 'draft preserved across rotation', 'fullscreen', 'clean close']}, indent=2))
+                               'hold tool label', 'diagram palette and curved gesture ending at release', 'Select and endpoint handles', 'move arrow body and undo', 'shape resize handles, fixed anchor, persistence and undo', 'magnet toggle, endpoint snap, release and undo', 'rotation', 'draft preserved across rotation', 'fullscreen', 'clean close']}, indent=2))
                 print('Headless Wayland checks passed')
             finally:
                 if pointer:

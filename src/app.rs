@@ -1,3 +1,4 @@
+mod magnet;
 mod selection;
 mod sharing;
 mod tools;
@@ -63,6 +64,7 @@ pub enum Action {
     Tool(String),
     PenPanel,
     DiagramPanel,
+    Magnet,
     Shape(Shape),
     Pen(String),
     Width(f64),
@@ -380,6 +382,8 @@ pub struct App {
     pub hidden: bool,
     pub tool: String,
     pub diagram_shape: Shape,
+    pub magnet: bool,
+    pub snap_target: Option<Point>,
     pub page_selection: Option<std::collections::BTreeSet<String>>,
     pub tool_tip: Option<(Box2, String)>,
     pub nib: Stroke,
@@ -510,6 +514,7 @@ impl App {
         let fullscreen = prefs.start_fullscreen;
         let library_list = store.setting("library_list", false);
         let library_sort = store.setting::<usize>("library_sort", 0).min(4);
+        let magnet = store.setting("magnet", false);
         let diagram_shape = store.setting("diagram_shape", Shape::default());
         let mut app = Self {
             sharing: None,
@@ -537,6 +542,8 @@ impl App {
             hidden: false,
             tool: "pen".into(),
             diagram_shape,
+            magnet,
+            snap_target: None,
             page_selection: None,
             tool_tip: None,
             nib: Stroke::default(),
@@ -1062,6 +1069,10 @@ impl App {
                 self.dialog = Some(Dialog::PenPanel);
             }
             Action::DiagramPanel => self.dialog = Some(Dialog::DiagramPanel),
+            Action::Magnet => {
+                self.store.set("magnet", &!self.magnet)?;
+                self.magnet = !self.magnet;
+            }
             Action::Shape(shape) => {
                 self.diagram_shape = shape;
                 self.store.set("diagram_shape", &shape)?;
@@ -1335,7 +1346,7 @@ impl App {
                 self.dialog = Some(
                     Dialog::Message(
                         "PinePaper · Rust".into(),
-                        "Pen: write on contact. Tap active Pen for nib settings. Hold a toolbar icon to see its name. Select: tap an object and drag its body to move it. Drag either circular handle on a selected line or arrow to move that endpoint. Drag corner or edge handles on other diagram shapes to resize them; circles and squares keep their proportions. Lasso: surround several objects, then drag them. Diagram: pick a shape, then drag on the page. Quick sheets: Page overview → Make notebook moves selected pages into a named notebook. Fingers scroll; palm gestures are suppressed near the pen.\n\nNotes save automatically after each stroke. Import PDF, EPUB and text from My files. Export PDF or back up the entire library as ZIP.\n\nF11 fullscreen · Ctrl+N new · Ctrl+O import · Ctrl+Z undo · Ctrl+Shift+Z redo · Page Up/Down · Escape tools · Ctrl+Q quit"
+                        "Pen: write on contact. Tap active Pen for nib settings. Hold a toolbar icon to see its name. Select: tap an object and drag its body to move it. Drag either circular handle on a selected line or arrow to move that endpoint. Drag corner or edge handles on other diagram shapes to resize them; circles and squares keep their proportions. Magnet: toggle the horseshoe icon to snap diagram endpoints and shape connection points when moving or resizing. Lasso: surround several objects, then drag them. Diagram: pick a shape, then drag on the page. Quick sheets: Page overview → Make notebook moves selected pages into a named notebook. Fingers scroll; palm gestures are suppressed near the pen.\n\nNotes save automatically after each stroke. Import PDF, EPUB and text from My files. Export PDF or back up the entire library as ZIP.\n\nF11 fullscreen · Ctrl+N new · Ctrl+O import · Ctrl+Z undo · Ctrl+Shift+Z redo · Page Up/Down · Escape tools · Ctrl+Q quit"
                             .into(),
                     ),
                 );
@@ -2389,7 +2400,10 @@ impl App {
                 }
                 self.redraw = true;
             }
-            Gesture::ObjectEdit(edit) => {
+            Gesture::ObjectEdit(mut edit) => {
+                if self.snap_target.take().is_some() {
+                    self.repaint_object_edit(&mut edit, self.selection_region());
+                }
                 if self.page().is_some_and(|p| p.payload != edit.original) {
                     self.remember_changed(&edit.original);
                     if let Err(e) = self.save() {

@@ -137,6 +137,27 @@ pub fn endpoints(stroke: &Stroke) -> Option<[Point; 2]> {
         None
     }
 }
+/// Connection points on the actual geometry, not sampled ink or arrowhead tips.
+pub fn anchors(stroke: &Stroke) -> Vec<Point> {
+    if let Some(ends) = endpoints(stroke) {
+        return ends.into_iter().collect();
+    }
+    let Some(b) = bounds(stroke) else {
+        return vec![];
+    };
+    let handles: &[ResizeHandle] =
+        if matches!(shape(stroke), Some(Shape::Rectangle | Shape::Square)) {
+            &ResizeHandle::ALL
+        } else {
+            &[
+                ResizeHandle::North,
+                ResizeHandle::East,
+                ResizeHandle::South,
+                ResizeHandle::West,
+            ]
+        };
+    handles.iter().map(|h| h.point(b)).collect()
+}
 pub fn with_endpoint(stroke: &Stroke, end: usize, point: Point) -> Option<Stroke> {
     let mut ends = endpoints(stroke)?;
     let previous = *ends.get(end)?;
