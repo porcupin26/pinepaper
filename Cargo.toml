@@ -19,7 +19,7 @@ rusqlite = { version = "0.38", features = ["bundled", "backup"] }
 uuid = { version = "1", features = ["v4"] }
 fontdue = "0.9"
 image = { version = "0.25", default-features = false, features = ["png", "pnm"] }
-zip = { version = "2.4", default-features = false, features = ["deflate"] }
+zip = { version = "9.0", default-features = false, features = ["deflate"] }
 roxmltree = "0.21"
 html2text = "0.15"
 flate2 = "1"
