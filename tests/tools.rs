@@ -15,6 +15,71 @@ fn drag(a: &mut App, start: [f64; 3], end: [f64; 3]) {
     a.up(q[0], q[1]);
 }
 #[test]
+fn curved_arrow_gestures_follow_latest_frame_and_exact_release_without_losing_ink_samples() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut a = App::new(dir.path().into()).unwrap();
+    a.resize(702, 936, 2);
+    a.act(Action::New("notebook".into()));
+    for shape in [Shape::Line, Shape::Arrow, Shape::DoubleArrow] {
+        a.act(Action::Shape(shape));
+        a.render();
+        let start = [120., 180., 0.5];
+        let p = a.view.screen(start);
+        a.down(p[0], p[1], 0.5, false);
+        let before = a.surface.pixels.clone();
+        for i in 0..120 {
+            let t = i as f64 / 120. * std::f64::consts::TAU;
+            let p = a
+                .view
+                .screen([340. + 160. * t.cos(), 450. + 170. * t.sin(), 0.5]);
+            a.queue_motion(p[0], p[1], 0.5);
+        }
+        assert!(
+            a.surface.pixels == before,
+            "Queued geometry must not repaint old samples"
+        );
+        let latest = [520., 500., 0.5];
+        let p = a.view.screen(latest);
+        a.queue_motion(p[0], p[1], 0.5);
+        a.render();
+        assert!(a.surface.pixels != before);
+        let ends = pinepaper::diagram::endpoints(a.live_stroke().unwrap()).unwrap();
+        assert!((ends[1][0] - latest[0]).abs() < 1e-8);
+        // Queue more motion, then release at a different position without a motion frame.
+        a.queue_motion(p[0] - 50., p[1] + 30., 0.5);
+        let release = [420., 620., 0.5];
+        let p = a.view.screen(release);
+        a.up(p[0], p[1]);
+        let ends = pinepaper::diagram::endpoints(a.page().unwrap().payload.strokes.last().unwrap())
+            .unwrap();
+        for axis in [0, 1] {
+            assert!((ends[0][axis] - start[axis]).abs() < 1e-8);
+            assert!((ends[1][axis] - release[axis]).abs() < 1e-8);
+        }
+        let saved = a.page().unwrap().payload.clone();
+        a.queue_motion(650., 850., 0.);
+        a.render();
+        assert_eq!(
+            a.page().unwrap().payload,
+            saved,
+            "Hover cannot move a released endpoint"
+        );
+    }
+    a.act(Action::Tool("pen".into()));
+    a.render();
+    let p = a.view.screen([100., 300., 0.5]);
+    a.down(p[0], p[1], 0.5, false);
+    for i in 1..=100 {
+        a.queue_motion(p[0] + i as f64, p[1] + (i as f64).sin(), i as f64 / 100.);
+    }
+    assert_eq!(
+        a.live_stroke().unwrap().points.len(),
+        101,
+        "Freehand ink keeps every sample"
+    );
+    a.up(p[0] + 100., p[1]);
+}
+#[test]
 fn commands_follow_document_and_history_without_repainting_ink() {
     let dir = tempfile::tempdir().unwrap();
     let mut a = App::new(dir.path().into()).unwrap();

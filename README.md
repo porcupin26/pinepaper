@@ -89,6 +89,9 @@ and Delete selection appears after selecting objects with Select or Lasso.
 Tap the **Diagram** icon below Text. Choose a shape, then drag from one corner
 to another (or from tail to tip for an arrow). Squares and circles keep equal
 width and height. Tap Diagram again to change the shape, line weight or colour.
+Lines and arrows connect the initial contact point to the final pen-up position;
+you can take a curved path while dragging. The preview follows the newest pen
+position, and lifting the pen fixes the endpoint there.
 Tap **Select**, the pointer icon below Diagram, to select a shape, an ink stroke
 or a text object. Drag its body to move it; tap empty space to deselect. You can
 also select and move in one drag. Select works with the pen or a finger, even
@@ -148,7 +151,7 @@ fullscreen; the preference is remembered.
 Alternative formats:
 
 - **AppImage:** from the same artifact, run `chmod +x PinePaper-*.AppImage`,
-  then `./PinePaper-0.6.1-x86_64.AppImage` (substitute `aarch64` on ARM).
+  then `./PinePaper-0.6.2-x86_64.AppImage` (substitute `aarch64` on ARM).
   If FUSE is unavailable, prefix the launch with `APPIMAGE_EXTRACT_AND_RUN=1`.
 - **Flatpak:** download the matching `flatpak-x86_64` or `flatpak-aarch64`
   artifact, verify its checksums, then run the commands below. The separate
@@ -160,7 +163,7 @@ Alternative formats:
 
 ```sh
 flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install --user ./PinePaper-0.6.1-x86_64.flatpak
+flatpak install --user ./PinePaper-0.6.2-x86_64.flatpak
 flatpak run eu.pinepaper.PinePaper.Rust
 ```
 
@@ -377,6 +380,18 @@ from motion events. Rendering is antialiased, with per-stroke coverage so
 overlapping highlighter segments do not accumulate opacity within one stroke.
 Raw and display-toned pixels remain separate.
 
+Long diagram segments use narrow scanline bounds instead of scanning the empty
+rectangle around a diagonal. Select and Lasso movement cache unchanged lower
+layers while preserving the order of overlapping ink and text. Diagram and
+object previews use the latest motion in each input batch; freehand ink still
+keeps every sample. Pen-up always applies its final position before saving.
+
+Run `cargo run --release --example interaction_bench` for a repeatable CPU test
+at PineNote resolution using a temporary library. On a PineNote, the 0.6.2 change
+reduced median large-arrow updates from 71 to 5 ms, and object movement from
+103 to 6 ms (223 to 6 ms with 80 background strokes). These numbers measure
+application preview rendering, excluding compositor and physical panel latency.
+
 Hardware status, PDF rendering, thumbnails, imports, exports and backups use
 workers. Full page redraws happen for structural edits, navigation and resize.
 Fixed document coordinates keep annotations attached through rotation.
@@ -410,11 +425,11 @@ under `usr/share/licenses/pinepaper/third-party/`.
 Use the ARM64 Arch package on PineNote:
 
 ```sh
-sudo pacman -U pinepaper-0.6.1-1-aarch64.pkg.tar.zst
+sudo pacman -U pinepaper-0.6.2-1-aarch64.pkg.tar.zst
 ```
 
 The source `packaging/PKGBUILD` supports x86_64 and aarch64 after a matching
-`v0.6.1` tag exists. Before that tag exists, use Cargo/nFPM directly. For local
+`v0.6.2` tag exists. Before that tag exists, use Cargo/nFPM directly. For local
 package builds, install Python 3, binutils, curl, tar and zstd, then run:
 
 ```sh

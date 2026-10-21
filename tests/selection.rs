@@ -289,3 +289,79 @@ fn fractional_handle_centers_cannot_invert_the_circle_clamp_range() {
     }
     assert!(surface.pixels.contains(&BLACK));
 }
+
+#[test]
+fn queued_edit_uses_latest_endpoint_and_cached_layers_preserve_text_and_pdf() {
+    let arrow = Shape::Arrow.stroke([150., 300., 0.5], [450., 300., 0.5], 4., 0.45);
+    let (_dir, mut a) = fixture(vec![ink(100., 120.), arrow, ink(280., 330.)]);
+    a.pages[0].payload.texts.push(Text {
+        text: "Overlapping text\nand a second line".into(),
+        x: 280.,
+        y: 300.,
+        size: 22.,
+        font: "Sans".into(),
+        color: 0.3,
+        extra: Default::default(),
+    });
+    a.pdf = Some(image::RgbImage::from_fn(50, 70, |x, y| {
+        image::Rgb([180 + x as u8, 180 + y as u8, 210])
+    }));
+    a.prefs.page_contrast = 1.4;
+    a.prefs.page_gamma = 0.8;
+    a.redraw = true;
+    a.render();
+    touch(&mut a, [210., 300., 0.5]);
+    assert_eq!(a.selection.strokes, vec![1]);
+    let start = a.view.screen([450., 300., 0.5]);
+    a.down(start[0], start[1], 0.5, false);
+    a.render();
+    let before = a.surface.pixels.clone();
+    for i in 0..100 {
+        a.queue_motion(start[0] + 80., start[1] + i as f64, 0.5);
+    }
+    assert!(a.surface.pixels == before);
+    a.render();
+    // Two further visible previews exercise reuse of the same cached background.
+    for p in [[500., 400., 0.5], [380., 250., 0.5]] {
+        let q = a.view.screen(p);
+        a.queue_motion(q[0], q[1], 0.5);
+        a.render();
+    }
+    let preview = a.surface.pixels.clone();
+    a.redraw = true;
+    a.render();
+    assert!(
+        preview == a.surface.pixels,
+        "Cached PDF, tone and foreground text must match a full repaint"
+    );
+    a.queue_motion(start[0] + 10., start[1] + 10., 0.5);
+    let release = a.view.screen([520., 440., 0.5]);
+    a.up(release[0], release[1]);
+    let end = a.selected_endpoints().unwrap()[1];
+    assert!((end[0] - 520.).abs() < 1e-8 && (end[1] - 440.).abs() < 1e-8);
+    let saved = a.page().unwrap().payload.clone();
+    a.render();
+    assert_eq!(
+        a.page().unwrap().payload,
+        saved,
+        "Pending motion cannot leak past release"
+    );
+    a.act(Action::Undo);
+    assert_eq!(
+        a.page().unwrap().payload.strokes[1].points[1],
+        [450., 300., 0.5]
+    );
+    a.render();
+    touch(&mut a, [210., 300., 0.5]);
+    a.down(start[0], start[1], 0.5, false);
+    a.queue_motion(start[0] + 40., start[1] + 60., 0.5);
+    a.act(Action::Undo); // Shortcut while the pen is still down.
+    a.render();
+    a.up(start[0] + 90., start[1] + 80.);
+    a.render();
+    assert_eq!(
+        a.page().unwrap().payload.strokes[1].points[1],
+        [450., 300., 0.5],
+        "Undo during a drag must finish it and prevent a stale edit after release"
+    );
+}

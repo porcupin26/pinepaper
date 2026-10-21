@@ -327,7 +327,6 @@ enum Gesture {
     Diagram(Point, Stroke, SurfaceSnapshot),
     Erase(Point, Payload),
     Lasso(Vec<Point>),
-    Move(Point, Payload),
     Text,
     ObjectEdit(Box<selection::ObjectEdit>),
     SelectEmpty,
@@ -415,6 +414,7 @@ pub struct App {
     control_drag: Option<ControlDrag>,
     press_start: (f64, f64),
     last_pointer: (f64, f64),
+    pending_motion: Option<(f64, f64, f64)>,
     finger: bool,
     palm_until: Instant,
     jobs: mpsc::Sender<Work>,
@@ -576,6 +576,7 @@ impl App {
             control_drag: None,
             press_start: (0., 0.),
             last_pointer: (0., 0.),
+            pending_motion: None,
             finger: false,
             palm_until: Instant::now(),
             jobs,
@@ -612,7 +613,12 @@ impl App {
         self.redraw = true;
     }
     pub fn render(&mut self) {
+        self.flush_motion();
         if self.redraw {
+            if let Some(Gesture::ObjectEdit(edit)) = &mut self.gesture {
+                // A full repaint may change the PDF, view, or page tone.
+                edit.background = None;
+            }
             // A PDF load or other full repaint can change the page during a drag.
             // Refresh the clean background before restoring the diagram preview.
             if matches!(self.gesture, Some(Gesture::Diagram(..))) {
@@ -674,6 +680,11 @@ impl App {
         ));
     }
     pub fn act(&mut self, action: Action) {
+        // Keyboard shortcuts can arrive during a pen drag. Finish its latest
+        // preview before Undo/navigation changes object indices or page content.
+        if self.gesture.is_some() {
+            self.finish();
+        }
         self.tool_tip = None;
         self.tip_until = None;
         let keyboard_mode = self.keyboard_mode();
@@ -2051,6 +2062,7 @@ impl App {
         ui::repaint_keys(self, &expired);
     }
     pub fn down(&mut self, x: f64, y: f64, pressure: f64, finger: bool) {
+        self.flush_motion();
         if self.busy || self.gesture.is_some() {
             return;
         }
@@ -2144,9 +2156,7 @@ impl App {
                     .bounds
                     .is_some_and(|b| b.contains(p[0], p[1]))
                 {
-                    if let Some(page) = self.page() {
-                        self.gesture = Some(Gesture::Move(p, page.payload.clone()));
-                    }
+                    self.begin_selection_move(p);
                 } else {
                     self.selection = Selection::default();
                     self.gesture = Some(Gesture::Lasso(vec![p]));
@@ -2171,6 +2181,23 @@ impl App {
                     self.act(Action::SetSlider(kind, value));
                 }
             }
+        }
+    }
+    /// Preview geometry only needs the newest position in an input batch. Ink
+    /// keeps every sample so handwriting quality and pressure are unchanged.
+    pub fn queue_motion(&mut self, x: f64, y: f64, pressure: f64) {
+        if matches!(
+            self.gesture,
+            Some(Gesture::Diagram(..) | Gesture::ObjectEdit(_))
+        ) {
+            self.pending_motion = Some((x, y, pressure));
+        } else {
+            self.motion(x, y, pressure);
+        }
+    }
+    fn flush_motion(&mut self) {
+        if let Some((x, y, pressure)) = self.pending_motion.take() {
+            self.motion(x, y, pressure);
         }
     }
     pub fn motion(&mut self, x: f64, y: f64, pressure: f64) {
@@ -2235,29 +2262,15 @@ impl App {
                 let r = self.surface.segment(self.view, a, p, &s);
                 self.dirty(r);
             }
-            Gesture::Move(start, original) => {
-                if let Some(page) = self.pages.get_mut(self.index) {
-                    page.payload = original.clone();
-                    let (dx, dy) = (p[0] - start[0], p[1] - start[1]);
-                    for &i in &self.selection.strokes {
-                        for q in &mut page.payload.strokes[i].points {
-                            q[0] += dx;
-                            q[1] += dy;
-                        }
-                    }
-                    for &i in &self.selection.texts {
-                        page.payload.texts[i].x += dx;
-                        page.payload.texts[i].y += dy;
-                    }
-                    self.redraw = true;
-                }
-            }
             Gesture::ObjectEdit(edit) => self.move_object(edit, p),
             Gesture::Text | Gesture::SelectEmpty => (),
         }
         self.gesture = Some(gesture);
     }
     pub fn up(&mut self, x: f64, y: f64) {
+        // Release coordinates supersede queued previews, even after a curved
+        // path or when release is delivered without a preceding motion frame.
+        self.pending_motion = None;
         self.update_tooltip(Instant::now());
         if self.long_pressed {
             self.press = None;
@@ -2327,6 +2340,7 @@ impl App {
         self.finger = false;
     }
     pub fn finish(&mut self) {
+        self.flush_motion();
         self.control_drag = None;
         self.press = None;
         self.long_pressed = false;
@@ -2364,7 +2378,7 @@ impl App {
                     self.redraw = true;
                 }
             }
-            Gesture::Erase(_, original) | Gesture::Move(_, original) => {
+            Gesture::Erase(_, original) => {
                 self.remember_changed(&original);
                 self.selection_bounds();
                 if let Err(e) = self.save() {

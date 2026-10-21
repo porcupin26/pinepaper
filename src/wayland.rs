@@ -229,7 +229,7 @@ impl State {
         if p.start && p.inside {
             self.app.down(p.p.x, p.p.y, p.pressure, false);
         } else if (p.down || p.end) && p.moved {
-            self.app.motion(p.p.x, p.p.y, p.pressure);
+            self.app.queue_motion(p.p.x, p.p.y, p.pressure);
         }
         if p.end {
             self.app.up(p.p.x, p.p.y);
@@ -618,7 +618,7 @@ impl Dispatch<wl_pointer::WlPointer, ()> for State {
                     y: surface_y,
                 };
                 if s.pointer_down {
-                    s.app.motion(surface_x, surface_y, 0.5);
+                    s.app.queue_motion(surface_x, surface_y, 0.5);
                 }
             }
             wl_pointer::Event::Button {
@@ -668,7 +668,7 @@ impl Dispatch<wl_touch::WlTouch, ()> for State {
             }
             wl_touch::Event::Motion { id, x, y, .. } if s.touch == Some(id) => {
                 s.touch_position = Point { x, y };
-                s.app.motion(x, y, 0.5);
+                s.app.queue_motion(x, y, 0.5);
             }
             wl_touch::Event::Up { id, .. } if s.touch == Some(id) => {
                 s.app.up(s.touch_position.x, s.touch_position.y);

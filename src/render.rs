@@ -336,6 +336,15 @@ impl Surface {
         }
     }
     pub fn segment(&mut self, v: View, a: Point, b: Point, stroke: &Stroke) -> Rect {
+        self.segment_raster::<true>(v, a, b, stroke)
+    }
+    fn segment_raster<const SCANLINE: bool>(
+        &mut self,
+        v: View,
+        a: Point,
+        b: Point,
+        stroke: &Stroke,
+    ) -> Rect {
         let old = self.clip;
         self.clip = v.clip;
         let aa = v.screen(a);
@@ -389,7 +398,32 @@ impl Surface {
         let dy = b[1] - a[1];
         let dd = dx * dx + dy * dy;
         for y in bounds.y..bounds.bottom {
-            for x in bounds.x..bounds.right {
+            // Intersect this row with the segment's antialiased capsule. A long
+            // diagonal must visit pixels near the ink, not its entire rectangle.
+            // Keep the exact coverage calculation below (including round caps).
+            let (left, right) = if SCANLINE && dy.abs() > 1e-9 {
+                let radius = r + 0.5;
+                let t0 = (y as f64 + 0.5 - radius - a[1]) / dy;
+                let t1 = (y as f64 + 0.5 + radius - a[1]) / dy;
+                let lo = t0.min(t1).max(0.);
+                let hi = t0.max(t1).min(1.);
+                if lo > hi {
+                    continue;
+                }
+                let x0 = a[0] + lo * dx;
+                let x1 = a[0] + hi * dx;
+                (
+                    bounds
+                        .x
+                        .max((x0.min(x1) - radius - 1.).floor().max(0.) as usize),
+                    bounds
+                        .right
+                        .min((x0.max(x1) + radius + 1.).ceil().max(0.) as usize),
+                )
+            } else {
+                (bounds.x, bounds.right)
+            };
+            for x in left..right {
                 let t = if dd > 0. {
                     (((x as f64 + 0.5 - a[0]) * dx + (y as f64 + 0.5 - a[1]) * dy) / dd)
                         .clamp(0., 1.)
@@ -507,22 +541,95 @@ impl Surface {
             );
         }
         if annotations {
-            for s in &p.strokes {
-                self.stroke(v, s);
-            }
-            for t in &p.texts {
-                self.text(
-                    &t.text,
-                    v.x + t.x * v.zoom,
-                    v.y + t.y * v.zoom,
-                    t.size * v.zoom,
-                    gray_color(t.color),
-                    (PAGE_W - t.x - 24.).max(1.) * v.zoom,
-                    t.font == "Serif",
-                );
-            }
+            self.objects(v, &p.strokes, &p.texts);
         }
         self.clip = old;
+    }
+    fn objects(&mut self, v: View, strokes: &[Stroke], texts: &[Text]) {
+        for s in strokes {
+            self.stroke(v, s);
+        }
+        for t in texts {
+            self.text(
+                &t.text,
+                v.x + t.x * v.zoom,
+                v.y + t.y * v.zoom,
+                t.size * v.zoom,
+                gray_color(t.color),
+                (PAGE_W - t.x - 24.).max(1.) * v.zoom,
+                t.font == "Serif",
+            );
+        }
+    }
+    /// Cache the fixed layers below an edit once, retaining the exact draw order.
+    pub fn object_background(
+        &mut self,
+        view: View,
+        payload: &Payload,
+        pdf: Option<&image::RgbImage>,
+        first_stroke: usize,
+        first_text: usize,
+    ) -> SurfaceSnapshot {
+        let previous = self.snapshot();
+        let mut lower = payload.clone();
+        lower.strokes.truncate(first_stroke);
+        lower.texts.truncate(first_text);
+        let rect = self.repaint_page_region(view, &lower, pdf, view.clip);
+        let background = self.snapshot();
+        self.restore(&previous, rect);
+        background
+    }
+    /// Restore cached lower layers, then paint the edited object and layers above
+    /// it. PDF/template/text layout and earlier ink are not rerendered per sample.
+    #[allow(clippy::too_many_arguments)]
+    pub fn repaint_objects(
+        &mut self,
+        view: View,
+        payload: &Payload,
+        background: &SurfaceSnapshot,
+        first_stroke: usize,
+        first_text: usize,
+        region: Box2,
+    ) -> Rect {
+        let old_clip = self.clip;
+        self.clip = view.clip;
+        let rect = self.rect(region);
+        if rect.x >= rect.right || rect.y >= rect.bottom {
+            self.clip = old_clip;
+            return rect;
+        }
+        self.restore(background, rect);
+        let clip = Box2::new(
+            rect.x as f64 / self.scale,
+            rect.y as f64 / self.scale,
+            (rect.right - rect.x) as f64 / self.scale,
+            (rect.bottom - rect.y) as f64 / self.scale,
+        );
+        let lut = self.tone_lut.take();
+        if lut.is_some() {
+            for y in rect.y..rect.bottom {
+                let row = y * self.width + rect.x..y * self.width + rect.right;
+                self.pixels[row.clone()].copy_from_slice(&self.raw[row]);
+            }
+        }
+        self.clip = clip;
+        self.objects(
+            View { clip, ..view },
+            &payload.strokes[first_stroke..],
+            &payload.texts[first_text..],
+        );
+        if let Some(table) = &lut {
+            for y in rect.y..rect.bottom {
+                for x in rect.x..rect.right {
+                    let i = y * self.width + x;
+                    self.raw[i] = self.pixels[i];
+                    self.pixels[i] = toned(self.pixels[i], table);
+                }
+            }
+        }
+        self.tone_lut = lut;
+        self.clip = old_clip;
+        rect
     }
     /// Rebuild only the dirty region, preserving raw pixels outside it and draw order.
     pub fn repaint_page_region(
@@ -705,4 +812,58 @@ fn toned(p: u32, lut: &[u32; 256]) -> u32 {
         | (lut[((p >> 16) & 255) as usize] << 16)
         | (lut[((p >> 8) & 255) as usize] << 8)
         | lut[(p & 255) as usize]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scanline_capsules_match_exhaustive_raster_for_clips_caps_pressure_and_tone() {
+        let mut fast = Surface::new();
+        let mut reference = Surface::new();
+        for scale in [1, 2] {
+            fast.resize(140, 180, scale);
+            reference.resize(140, 180, scale);
+            let v = View {
+                x: 3.2,
+                y: 4.7,
+                zoom: 0.85,
+                clip: Box2::new(9.25, 11.5, 110.5, 145.25),
+            };
+            fast.tone(v.clip, 1.3, 0.8);
+            reference.tone(v.clip, 1.3, 0.8);
+            for i in 0..180 {
+                let angle = i as f64 * std::f64::consts::TAU / 180.;
+                let a = [72.3 + 120. * angle.cos(), 88.7 + 145. * angle.sin(), 0.17];
+                let b = if i % 11 == 0 {
+                    a
+                } else {
+                    [72.3 - 95. * angle.cos(), 88.7 - 115. * angle.sin(), 0.94]
+                };
+                let s = Stroke {
+                    width: [0.3, 2.4, 8., 22.][i % 4],
+                    pen: ["Fineliner", "Ballpoint", "Pencil", "Calligraphy"][i % 4].into(),
+                    tool: if i % 5 == 0 { "highlighter" } else { "pen" }.into(),
+                    color: 0.3,
+                    ..Stroke::default()
+                };
+                fast.begin_stroke();
+                reference.begin_stroke();
+                for (a, b) in [(a, a), (a, b), (b, a)] {
+                    let actual = fast.segment(v, a, b, &s);
+                    let expected = reference.segment_raster::<false>(v, a, b, &s);
+                    assert_eq!(actual, expected);
+                }
+                assert!(
+                    fast.pixels == reference.pixels,
+                    "Visible raster differs at angle {i}, scale {scale}"
+                );
+                assert!(
+                    fast.raw == reference.raw,
+                    "Untinted raster differs at angle {i}, scale {scale}"
+                );
+            }
+        }
+    }
 }

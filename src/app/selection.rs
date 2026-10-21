@@ -11,6 +11,9 @@ pub(super) struct ObjectEdit {
     kind: EditKind,
     dragging: bool,
     bounds: Box2,
+    pub background: Option<SurfaceSnapshot>,
+    first_stroke: usize,
+    first_text: usize,
 }
 
 impl App {
@@ -91,6 +94,12 @@ impl App {
             };
             EditKind::Move
         };
+        self.start_object_edit(p, kind);
+    }
+    pub(super) fn begin_selection_move(&mut self, p: Point) {
+        self.start_object_edit(p, EditKind::Move);
+    }
+    fn start_object_edit(&mut self, p: Point, kind: EditKind) {
         self.selection_bounds();
         self.redraw = true;
         let Some(bounds) = self.selection.bounds else {
@@ -104,6 +113,24 @@ impl App {
                 kind,
                 dragging: false,
                 bounds,
+                background: None,
+                first_stroke: self
+                    .selection
+                    .strokes
+                    .iter()
+                    .copied()
+                    .min()
+                    .unwrap_or(page.payload.strokes.len()),
+                first_text: if self.selection.strokes.is_empty() {
+                    self.selection
+                        .texts
+                        .iter()
+                        .copied()
+                        .min()
+                        .unwrap_or(page.payload.texts.len())
+                } else {
+                    0
+                },
             })));
         }
     }
@@ -177,10 +204,21 @@ impl App {
                     (old.y + old.h).max(new.y + new.h) - y,
                 );
                 if let Some(page) = self.pages.get(self.index) {
-                    let damage = self.surface.repaint_page_region(
+                    let background = edit.background.get_or_insert_with(|| {
+                        self.surface.object_background(
+                            self.view,
+                            &page.payload,
+                            self.pdf.as_ref(),
+                            edit.first_stroke,
+                            edit.first_text,
+                        )
+                    });
+                    let damage = self.surface.repaint_objects(
                         self.view,
                         &page.payload,
-                        self.pdf.as_ref(),
+                        background,
+                        edit.first_stroke,
+                        edit.first_text,
                         region,
                     );
                     ui::selection_overlay(self);

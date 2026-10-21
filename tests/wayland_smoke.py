@@ -115,12 +115,19 @@ def main():
                     point('move 250 400 936 702')
                     point('down')
                     for i in range(30):
-                        point(f'move {250+i*5} {400+i*3} 936 702')
+                        # A curved pen path still creates a straight tail-to-tip arrow.
+                        point(f'move {250+i*5} {round(400+i*3+35*math.sin(i*math.pi/29))} 936 702')
+                    point('move 395 487 936 702')
                     point('up')
                     time.sleep(.5)
                     payload=json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])
                     assert len(payload['strokes']) == 2, payload
                     assert payload['strokes'][-1]['diagram_shape'] == 'Arrow', payload
+                    ends = payload['strokes'][-1]['points'][:2]
+                    # Convert from document coordinates to this fixed landscape viewport.
+                    zoom = (936-68-24)/760
+                    assert abs(80 + ends[1][0]*zoom - 395) < .1, ends
+                    assert abs(98 + ends[1][1]*zoom - 487) < .1, ends
                     subprocess.run(['grim', str(output / 'diagram.png')], env=env, check=True)
                     click(34,426)  # Select, below Diagram.
                     click(322,443)  # Select the arrow shaft.
@@ -168,7 +175,7 @@ def main():
                     db.close()
                 (output / 'result.json').write_text(json.dumps({'passed': True,
                     'checks': ['native Wayland launch', 'Notebook toolbar action opens drawing immediately', 'optional title rename', 'pointer ink persisted', 'pen popup and outside dismissal without ink',
-                               'hold tool label', 'diagram palette and persisted arrow', 'Select and endpoint handles', 'move arrow body and undo', 'rotation', 'draft preserved across rotation', 'fullscreen', 'clean close']}, indent=2))
+                               'hold tool label', 'diagram palette and curved gesture ending at release', 'Select and endpoint handles', 'move arrow body and undo', 'rotation', 'draft preserved across rotation', 'fullscreen', 'clean close']}, indent=2))
                 print('Headless Wayland checks passed')
             finally:
                 if pointer:
