@@ -70,8 +70,7 @@ def main():
                     app = subprocess.Popen([str(binary), '--data-dir', str(root / 'library')],
                                            env=env, stdout=app_log, stderr=app_log)
                     time.sleep(1)
-                    click(870, 65)  # Create, then Notebook in the anchored popup.
-                    click(650, 166)
+                    click(450, 36)  # Notebook opens drawing directly from the library toolbar.
                     db = sqlite3.connect(root / 'library/library.sqlite3')
                     assert db.execute('SELECT title FROM documents').fetchone()[0] == 'Notebook 1'
                     click(160, 65)  # Naming is optional, through the document title.
@@ -116,7 +115,7 @@ def main():
                     assert app.wait(timeout=10) == 0
                     db.close()
                 (output / 'result.json').write_text(json.dumps({'passed': True,
-                    'checks': ['native Wayland launch', 'Create opens drawing immediately', 'optional title rename', 'pointer ink persisted', 'pen popup and outside dismissal without ink',
+                    'checks': ['native Wayland launch', 'Notebook toolbar action opens drawing immediately', 'optional title rename', 'pointer ink persisted', 'pen popup and outside dismissal without ink',
                                'rotation', 'draft preserved across rotation', 'fullscreen', 'clean close']}, indent=2))
                 print('Headless Wayland checks passed')
             finally:

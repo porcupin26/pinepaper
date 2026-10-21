@@ -100,7 +100,44 @@ fn smoke_test(output: PathBuf) -> Result<()> {
         vec![page.clone(), Payload::blank("Dots"), Payload::blank("Grid")],
         None,
     )?;
-    a.store.create("Work", "folder", None, vec![], None)?;
+    for name in [
+        "Projects",
+        "Development",
+        "Financials",
+        "To Read",
+        "Planning",
+        "Market Analysis",
+    ] {
+        a.store.create(name, "folder", None, vec![], None)?;
+    }
+    let mut sketch = Payload::blank("Dots");
+    sketch.texts.push(Text {
+        text: "Project handover\n\nGoals → sketches → next steps".into(),
+        x: 55.,
+        y: 70.,
+        size: 26.,
+        font: "Sans".into(),
+        color: 0.08,
+        extra: Default::default(),
+    });
+    for (x, y) in [(85., 300.), (400., 300.), (245., 510.)] {
+        sketch.strokes.push(Stroke {
+            points: vec![
+                [x, y, 0.5],
+                [x + 190., y, 0.5],
+                [x + 190., y + 110., 0.5],
+                [x, y + 110., 0.5],
+                [x, y, 0.5],
+            ],
+            ..Stroke::default()
+        });
+    }
+    sketch.strokes.push(Stroke {
+        points: vec![[275., 355., 0.5], [400., 355., 0.5], [340., 510., 0.5]],
+        ..Stroke::default()
+    });
+    a.store
+        .create("Project handover", "notebook", None, vec![sketch], None)?;
     a.store.create(
         "Reading journal",
         "notebook",
@@ -116,6 +153,16 @@ fn smoke_test(output: PathBuf) -> Result<()> {
         a.render();
         a.surface
             .save_png(&output.join(format!("library-{label}.png")))?;
+        a.act(Action::LibraryMenu);
+        a.render();
+        a.surface
+            .save_png(&output.join(format!("library-menu-{label}.png")))?;
+        a.act(Action::Close);
+        a.act(Action::LibraryView);
+        a.render();
+        a.surface
+            .save_png(&output.join(format!("library-list-{label}.png")))?;
+        a.act(Action::LibraryView);
         a.act(Action::Create);
         a.render();
         a.surface

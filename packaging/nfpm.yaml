@@ -29,6 +29,14 @@ contents:
     dst: /usr/share/licenses/pinepaper/FONT-LICENSE.txt
   - src: README.md
     dst: /usr/share/doc/pinepaper/README.md
+  - src: docs/remarkable-reference.md
+    dst: /usr/share/doc/pinepaper/docs/remarkable-reference.md
+  - src: docs/images/library-landscape.png
+    dst: /usr/share/doc/pinepaper/docs/images/library-landscape.png
+  - src: docs/images/library-portrait.png
+    dst: /usr/share/doc/pinepaper/docs/images/library-portrait.png
+  - src: docs/images/library-menu-portrait.png
+    dst: /usr/share/doc/pinepaper/docs/images/library-menu-portrait.png
 overrides:
   deb:
     depends: [libc6 (>= ${PACKAGE_LIBC_MIN}), libgcc-s1, libxkbcommon0, poppler-utils, wl-clipboard]

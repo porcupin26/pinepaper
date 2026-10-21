@@ -11,6 +11,9 @@ pub enum Icon {
     Next,
     Close,
     Plus,
+    PlusCircle,
+    ChevronDown,
+    List,
     Menu,
     Settings,
     Search,
@@ -76,9 +79,19 @@ impl Icon {
                 p.path(&[(6., 6.), (18., 18.)]);
                 p.path(&[(18., 6.), (6., 18.)]);
             }
-            Self::Plus => {
+            Self::Plus | Self::PlusCircle => {
+                if matches!(self, Self::PlusCircle) {
+                    p.arc((12., 12.), (10., 10.), 0., TAU);
+                }
                 p.path(&[(12., 5.), (12., 19.)]);
                 p.path(&[(5., 12.), (19., 12.)]);
+            }
+            Self::ChevronDown => p.path(&[(5., 9.), (12., 16.), (19., 9.)]),
+            Self::List => {
+                for y in [5., 12., 19.] {
+                    p.rect(3., y - 1., 2., 2.);
+                    p.path(&[(9., y), (22., y)]);
+                }
             }
             Self::Menu => {
                 for y in [6., 12., 18.] {

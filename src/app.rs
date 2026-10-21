@@ -25,6 +25,10 @@ pub enum Screen {
 pub enum Action {
     None,
     Library,
+    LibraryHome,
+    LibraryView,
+    ClearSearch,
+    QuickSheets,
     Open(String),
     Up,
     Filter(String),
@@ -354,6 +358,7 @@ pub struct App {
     pub sort: usize,
     pub trash: bool,
     pub library_offset: usize,
+    pub library_list: bool,
     pub doc: Option<Document>,
     pub pages: Vec<Page>,
     pub index: usize,
@@ -480,6 +485,8 @@ impl App {
             }
         });
         let fullscreen = prefs.start_fullscreen;
+        let library_list = store.setting("library_list", false);
+        let library_sort = store.setting::<usize>("library_sort", 0).min(4);
         let mut app = Self {
             sharing: None,
             surface: Surface::new(),
@@ -496,9 +503,10 @@ impl App {
             folder: None,
             filter: String::new(),
             query: String::new(),
-            sort: 0,
+            sort: library_sort,
             trash: false,
             library_offset: 0,
+            library_list,
             doc: None,
             pages: vec![],
             index: 0,
@@ -652,6 +660,28 @@ impl App {
                 self.dialog = None;
                 self.reload_library()?;
             }
+            Action::LibraryHome => {
+                self.flush()?;
+                self.folder = None;
+                self.filter.clear();
+                self.query.clear();
+                self.trash = false;
+                self.library_offset = 0;
+                self.screen = Screen::Library;
+                self.dialog = None;
+                self.reload_library()?;
+            }
+            Action::LibraryView => {
+                self.library_list = !self.library_list;
+                self.store.set("library_list", &self.library_list)?;
+                self.library_offset = 0;
+                self.dialog = None;
+            }
+            Action::ClearSearch => {
+                self.query.clear();
+                self.library_offset = 0;
+                self.reload_library()?;
+            }
             Action::Open(id) => self.open(&id)?,
             Action::Up => {
                 self.folder = self
@@ -665,6 +695,10 @@ impl App {
             }
             Action::Filter(kind) => {
                 self.filter = kind;
+                self.folder = None;
+                self.trash = false;
+                self.screen = Screen::Library;
+                self.dialog = None;
                 self.library_offset = 0;
                 self.reload_library()?;
             }
@@ -672,26 +706,50 @@ impl App {
                 self.menu(
                     "Sort files",
                     vec![
-                        ("Recent", Action::SortBy(0)),
-                        ("Name", Action::SortBy(1)),
-                        ("Created", Action::SortBy(2)),
+                        ("Recently opened", Action::SortBy(0)),
+                        ("Alphabetical", Action::SortBy(1)),
+                        ("Date created", Action::SortBy(2)),
+                        ("Last modified", Action::SortBy(3)),
+                        ("File type", Action::SortBy(4)),
                     ],
                 );
             }
             Action::SortBy(sort) => {
-                self.sort = sort.min(2);
+                self.sort = sort.min(4);
+                self.store.set("library_sort", &self.sort)?;
+                self.library_offset = 0;
                 self.dialog = None;
                 self.reload_library()?;
             }
             Action::LibraryMenu => self.menu(
-                "My files",
+                "Library",
                 vec![
-                    ("Settings", Action::Settings),
+                    ("My files", Action::LibraryHome),
+                    ("Notebooks", Action::Filter("notebook".into())),
+                    ("PDFs", Action::Filter("pdf".into())),
+                    ("Ebooks", Action::Filter("book".into())),
                     ("Import PDF / EPUB / text", Action::Import),
+                    ("Join shared document", Action::JoinSharing),
+                    ("Settings", Action::Settings),
+                    (
+                        if self.fullscreen {
+                            "Leave fullscreen"
+                        } else {
+                            "Fullscreen"
+                        },
+                        Action::Fullscreen,
+                    ),
                     ("Back up library", Action::Backup),
-                    ("Sharing", Action::Sharing),
-                    ("Trash / My files", Action::TrashView),
+                    (
+                        if self.trash {
+                            "Return from trash"
+                        } else {
+                            "Trash"
+                        },
+                        Action::TrashView,
+                    ),
                     ("About & help", Action::Help),
+                    ("Quit PinePaper", Action::Quit),
                 ],
             ),
             Action::MenuScroll(delta) => {
@@ -723,6 +781,30 @@ impl App {
                     ("Import PDF / EPUB / text", Action::Import),
                 ],
             ),
+            Action::QuickSheets => {
+                self.flush()?;
+                let existing = self
+                    .store
+                    .setting::<Option<String>>("quick_sheets", None)
+                    .and_then(|id| self.store.document(&id).ok())
+                    .filter(|d| d.kind == "notebook" && !d.trashed);
+                if let Some(doc) = existing {
+                    self.open(&doc.id)?;
+                    self.index = self.pages.len() - 1;
+                    self.action(Action::AddPage)?;
+                } else {
+                    let id = self.store.create(
+                        "Quick sheets",
+                        "notebook",
+                        None,
+                        vec![Payload::blank("Blank")],
+                        None,
+                    )?;
+                    self.store.set("quick_sheets", &Some(&id))?;
+                    self.open(&id)?;
+                }
+                self.tool = "pen".into();
+            }
             Action::New(kind) if kind == "notebook" => {
                 self.flush()?;
                 let docs = self
@@ -1524,6 +1606,9 @@ impl App {
         if d.kind == "folder" {
             self.folder = Some(d.id);
             self.trash = false;
+            self.filter.clear();
+            self.query.clear();
+            self.dialog = None;
             self.library_offset = 0;
             self.reload_library()?;
             return Ok(());
@@ -2136,9 +2221,9 @@ impl App {
                     .clamp(0., (PAGE_H * self.view.zoom - self.view.clip.h).max(0.));
             }
             Screen::Library => {
-                self.library_offset = (self.library_offset as isize + if dy > 0. { 3 } else { -3 })
-                    .clamp(0, self.docs.len().saturating_sub(1) as isize)
-                    as usize;
+                self.library_offset = (self.library_offset as f64 + dy)
+                    .clamp(0., ui::library_scroll_max(self))
+                    .round() as usize;
             }
             Screen::Overview => {
                 self.overview_offset = (self.overview_offset as isize

@@ -1,4 +1,5 @@
 //! Monochrome, touch-sized controls. Widgets never participate in the live ink path.
+mod library;
 use crate::{
     app::{Action, App, Dialog, Input, Screen, Settings, SliderSetting, SwitchSetting},
     icons::Icon,
@@ -80,6 +81,11 @@ fn fullscreen_icon(a: &App) -> Icon {
 }
 fn menu_icon(action: &Action) -> Option<Icon> {
     Some(match action {
+        Action::LibraryHome => Icon::Folder,
+        Action::Filter(kind) if kind == "pdf" => Icon::Text,
+        Action::Filter(_) => Icon::Book,
+        Action::Fullscreen => Icon::Expand,
+        Action::Quit => Icon::Close,
         Action::New(kind) if kind == "folder" => Icon::Folder,
         Action::New(_) => Icon::Book,
         Action::Import | Action::Export | Action::Backup => Icon::Download,
@@ -168,6 +174,21 @@ pub fn status(a: &mut App) {
     if a.surface.width == 0 {
         return;
     }
+    if a.screen == Screen::Library {
+        if a.dialog.is_none() && !a.busy {
+            let old_len = a.hits.len();
+            library::footer(a);
+            a.hits.truncate(old_len);
+            let r = a.surface.rect(Box2::new(
+                0.,
+                a.surface.logical_h - 40.,
+                a.surface.logical_w,
+                40.,
+            ));
+            a.dirty(r);
+        }
+        return;
+    }
     let title = "PINEPAPER";
     let old_len = a.hits.len();
     top(a, title);
@@ -192,7 +213,7 @@ pub fn render(a: &mut App) {
     a.hits.clear();
     a.popup_bounds = None;
     match a.screen {
-        Screen::Library => library(a),
+        Screen::Library => library::render(a),
         Screen::Editor => editor(a),
         Screen::Overview => overview(a),
     }
@@ -212,221 +233,8 @@ pub fn render(a: &mut App) {
     }
     a.surface.reset_clip();
 }
-fn library(a: &mut App) {
-    let w = a.surface.logical_w;
-    let h = a.surface.logical_h;
-    top(a, "PINEPAPER");
-    let title = if a.trash {
-        "Trash".into()
-    } else if let Some(id) = &a.folder {
-        a.store
-            .document(id)
-            .map(|d| d.title)
-            .unwrap_or("Folder".into())
-    } else {
-        "My files".into()
-    };
-    icon_button(
-        a,
-        if a.folder.is_some() {
-            Icon::Back
-        } else {
-            Icon::Menu
-        },
-        Box2::new(16., 44., 44., 42.),
-        if a.folder.is_some() {
-            Action::Up
-        } else {
-            Action::LibraryMenu
-        },
-        false,
-    );
-    text(a, &title, 74., 54., 23., BLACK, (w - 440.).max(100.));
-    let mut x = (w - 354.).max(200.);
-    for (icon, bw, action) in [
-        (Icon::Search, 70., Action::Search),
-        (fullscreen_icon(a), 54., Action::Fullscreen),
-        (Icon::Settings, 76., Action::Settings),
-    ] {
-        icon_button(a, icon, Box2::new(x, 44., bw, 42.), action, false);
-        x += bw + 8.;
-    }
-    icon_label_button(
-        a,
-        Icon::Plus,
-        "Create",
-        Box2::new(x, 44., 100., 42.),
-        Action::Create,
-        true,
-    );
-    let mut x = 16.;
-    for (label, kind, bw) in [
-        ("All", "", 48.),
-        ("Notebooks", "notebook", 104.),
-        ("Books", "book", 68.),
-        ("PDFs", "pdf", 60.),
-    ] {
-        button(
-            a,
-            label,
-            Box2::new(x, 100., bw, 36.),
-            Action::Filter(kind.into()),
-            a.filter == kind,
-        );
-        x += bw + 8.;
-    }
-    icon_label_button(
-        a,
-        Icon::Sort,
-        ["Recent", "Name", "Created"][a.sort],
-        Box2::new(w - 140., 100., 124., 36.),
-        Action::Sort,
-        false,
-    );
-    if !a.query.is_empty() {
-        text(
-            a,
-            &format!("Search: {}", a.query),
-            16.,
-            145.,
-            13.,
-            GRAY,
-            w - 40.,
-        );
-    }
-    let cols = ((w - 24.) / 190.).floor().max(2.) as usize;
-    let cw = (w - 32. - (cols - 1) as f64 * 18.) / cols as f64;
-    let ch = (cw * 1.16 + 64.).min(316.);
-    let top = if a.query.is_empty() { 154. } else { 174. };
-    let rows = ((h - top - 48.) / ch).floor().max(1.) as usize;
-    let docs: Vec<_> = a
-        .docs
-        .iter()
-        .skip(a.library_offset)
-        .take(cols * rows)
-        .cloned()
-        .collect();
-    for (i, d) in docs.iter().enumerate() {
-        let x = 16. + (i % cols) as f64 * (cw + 18.);
-        let y = top + (i / cols) as f64 * ch;
-        let ph = ch - 68.;
-        let b = Box2::new(x, y, cw, ph);
-        a.surface.fill(b, WHITE);
-        a.surface.border(b, LINE, 1.);
-        if d.kind == "folder" {
-            let size = (cw * 0.45).min(80.);
-            Icon::Folder.draw(
-                &mut a.surface,
-                Box2::new(x + (cw - size) / 2., y + (ph - size) / 2., size, size),
-                BLACK,
-            );
-        } else if let Ok(pages) = a.store.pages(&d.id) {
-            if let Some(p) = pages.first() {
-                let zoom = ((cw - 16.) / PAGE_W).min((ph - 16.) / PAGE_H);
-                let v = View {
-                    x: x + (cw - PAGE_W * zoom) / 2.,
-                    y: y + 8.,
-                    zoom,
-                    clip: Box2::new(x + 4., y + 4., cw - 8., ph - 8.),
-                };
-                if d.kind == "pdf" {
-                    if let Ok(path) = a.store.source_path(d) {
-                        a.request_thumbnail(&d.id, 0, path);
-                    }
-                }
-                let preview = a.thumbnails.get(&(d.id.clone(), 0));
-                a.surface.page(v, &p.payload, preview, true);
-                if d.kind == "pdf" && preview.is_none() {
-                    text(a, "PDF", x + 14., y + 14., 18., GRAY, cw - 28.);
-                    text(a, &d.title, x + 14., y + 52., 14., BLACK, cw - 28.);
-                }
-            }
-        }
-        a.hits
-            .push((Box2::new(x, y, cw, ch - 12.), Action::Open(d.id.clone())));
-        a.surface.label(
-            &d.title,
-            Box2::new(x, y + ph + 7., cw - 40., 22.),
-            14.,
-            BLACK,
-        );
-        text(
-            a,
-            match d.kind.as_str() {
-                "notebook" => "Notebook",
-                "book" => "Book",
-                "folder" => "Folder",
-                _ => "PDF",
-            },
-            x,
-            y + ph + 31.,
-            11.,
-            GRAY,
-            cw - 44.,
-        );
-        icon_button(
-            a,
-            Icon::More,
-            Box2::new(x + cw - 36., y + ph + 8., 36., 34.),
-            Action::ItemMenu(d.id.clone()),
-            false,
-        );
-    }
-    if a.docs.is_empty() {
-        text(
-            a,
-            if a.trash {
-                "Nothing in the trash"
-            } else {
-                "Your library starts here"
-            },
-            26.,
-            top + 70.,
-            25.,
-            BLACK,
-            w - 52.,
-        );
-        text(
-            a,
-            "Create a notebook or import a PDF, EPUB or text file.",
-            26.,
-            top + 115.,
-            16.,
-            GRAY,
-            w - 52.,
-        );
-    }
-    a.surface.fill(Box2::new(0., h - 44., w, 44.), WHITE);
-    button(
-        a,
-        if a.trash { "My files" } else { "Trash" },
-        Box2::new(16., h - 39., 76., 32.),
-        Action::TrashView,
-        false,
-    );
-    button(
-        a,
-        "Backup",
-        Box2::new(100., h - 39., 82., 32.),
-        Action::Backup,
-        false,
-    );
-    button(
-        a,
-        "Quit",
-        Box2::new(190., h - 39., 64., 32.),
-        Action::Quit,
-        false,
-    );
-    text(
-        a,
-        &format!("{} items · scroll to browse", a.docs.len()),
-        (w - 238.).max(270.),
-        h - 28.,
-        12.,
-        GRAY,
-        225.,
-    );
+pub fn library_scroll_max(a: &App) -> f64 {
+    library::scroll_max(a)
 }
 fn footer(a: &mut App) {
     let w = a.surface.logical_w;
@@ -846,6 +654,10 @@ fn popover(a: &mut App, title: &str, width: f64, height: f64, beside: bool) -> B
     b
 }
 fn menu_popup(a: &mut App, title: &str, items: &[(String, Action)]) {
+    if title == "Library" {
+        library::sidebar(a, items);
+        return;
+    }
     let capacity = (((a.surface.logical_h - 170.) / 48.).floor() as usize).clamp(1, 8);
     let count = items.len().min(capacity);
     let scroll = items.len() > capacity;

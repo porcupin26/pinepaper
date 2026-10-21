@@ -6,6 +6,148 @@ use pinepaper::{
 };
 
 #[test]
+fn quick_sheets_reuses_identity_appends_without_losing_ink_and_respects_trash() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut a = App::new(dir.path().into()).unwrap();
+    a.resize(702, 936, 1);
+    a.act(Action::QuickSheets);
+    let id = a.doc.as_ref().unwrap().id.clone();
+    assert_eq!(a.screen, Screen::Editor);
+    assert_eq!(a.tool, "pen");
+    a.render();
+    let p = a.view.screen([150., 180., 0.5]);
+    a.down(p[0], p[1], 0.5, false);
+    a.motion(p[0] + 40., p[1] + 20., 0.7);
+    a.up(p[0] + 40., p[1] + 20.);
+    a.act(Action::Library);
+    let ink = a.store.pages(&id).unwrap()[0].payload.strokes.clone();
+    assert_eq!(ink.len(), 1);
+    a.store.rename(&id, "Scratchpad").unwrap();
+    a.act(Action::QuickSheets);
+    assert_eq!(a.doc.as_ref().unwrap().id, id);
+    assert_eq!(a.index, 1);
+    assert_eq!(a.pages.len(), 2);
+    assert_eq!(a.pages[0].payload.strokes[0].points, ink[0].points);
+    assert!(a.pages[1].payload.strokes.is_empty());
+    a.act(Action::Library);
+    drop(a);
+    let mut a = App::new(dir.path().into()).unwrap();
+    a.act(Action::QuickSheets);
+    assert_eq!(a.doc.as_ref().unwrap().id, id);
+    assert_eq!(a.index, 2);
+    a.act(Action::Library);
+    a.store.trash(&id, true).unwrap();
+    a.act(Action::QuickSheets);
+    assert_ne!(a.doc.as_ref().unwrap().id, id);
+    assert_eq!(a.pages.len(), 1);
+    assert!(a.store.document(&id).unwrap().trashed);
+    assert_eq!(
+        a.store.pages(&id).unwrap()[0].payload.strokes[0].points,
+        ink[0].points
+    );
+}
+
+#[test]
+fn library_filters_and_search_find_nested_files_and_preferences_survive_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut a = App::new(dir.path().into()).unwrap();
+    let folder = a
+        .store
+        .create("Projects", "folder", None, vec![], None)
+        .unwrap();
+    let nested = a
+        .store
+        .create(
+            "Deep notes",
+            "notebook",
+            Some(&folder),
+            vec![Payload::blank("Lined")],
+            None,
+        )
+        .unwrap();
+    a.reload_library().unwrap();
+    assert_eq!(a.docs.len(), 1);
+    a.act(Action::Filter("notebook".into()));
+    assert_eq!(a.docs[0].id, nested);
+    a.act(Action::LibraryHome);
+    a.query = "deep".into();
+    a.reload_library().unwrap();
+    assert_eq!(a.docs[0].id, nested);
+    a.act(Action::ClearSearch);
+    assert_eq!(a.docs[0].id, folder);
+    a.act(Action::LibraryView);
+    a.act(Action::SortBy(3));
+    drop(a);
+    let a = App::new(dir.path().into()).unwrap();
+    assert!(a.library_list);
+    assert_eq!(a.sort, 3);
+}
+
+#[test]
+fn library_scrolling_reaches_every_file_without_covering_fixed_controls() {
+    use std::collections::HashSet;
+    let dir = tempfile::tempdir().unwrap();
+    let mut a = App::new(dir.path().into()).unwrap();
+    for i in 0..12 {
+        a.store
+            .create(&format!("Folder {i}"), "folder", None, vec![], None)
+            .unwrap();
+        a.store
+            .create(
+                &format!("Notes {i}"),
+                "notebook",
+                None,
+                vec![Payload::blank("Lined")],
+                None,
+            )
+            .unwrap();
+    }
+    a.reload_library().unwrap();
+    for (w, h) in [(702, 936), (936, 702)] {
+        for list in [false, true] {
+            a.library_list = list;
+            a.prefs.ui_font_size = 18.;
+            a.resize(w, h, 1);
+            a.library_offset = 0;
+            let mut reached = HashSet::new();
+            loop {
+                a.redraw = true;
+                a.render();
+                for (b, action) in &a.hits {
+                    assert!(
+                        b.x >= 0. && b.y >= 0. && b.x + b.w <= w as f64 && b.y + b.h <= h as f64,
+                        "{action:?}: {b:?}"
+                    );
+                    if let Action::Open(id) = action {
+                        assert!(b.y >= 160. && b.y + b.h <= h as f64 - 40.);
+                        reached.insert(id.clone());
+                    }
+                }
+                let header = a.surface.pixels[..w * 160].to_vec();
+                let hits = a.hits.clone();
+                pinepaper::ui::status(&mut a);
+                assert_eq!(header, a.surface.pixels[..w * 160]);
+                assert_eq!(hits, a.hits);
+                let old = a.library_offset;
+                a.scroll_by(300.);
+                if old == a.library_offset {
+                    break;
+                }
+            }
+            assert_eq!(reached.len(), 24);
+            a.act(Action::LibraryMenu);
+            a.render();
+            let panel = a.popup_bounds.unwrap();
+            let x = panel.w + 25.;
+            a.down(x, 300., 0.5, false);
+            a.up(x, 300.);
+            assert!(a.dialog.is_none());
+            assert_eq!(a.screen, Screen::Library);
+        }
+    }
+}
+
+#[test]
 fn button_labels_are_centered_at_both_display_scales() {
     use pinepaper::render::{BLACK, WHITE};
     for scale in [1, 2] {

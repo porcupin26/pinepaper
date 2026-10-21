@@ -9,9 +9,12 @@ No account is required.
 
 ## Features
 
-- Library grid: notebooks, books, PDFs, folders, search, type filters, sorting,
-  rename, move, recoverable trash, and document/page previews.
-- Create → Notebook opens a drawing page immediately with the pen selected.
+- Library with a slim creation toolbar, compact folder rows, large page previews,
+  grid/list views, global filename search, type filters, sorting, rename, move
+  and recoverable trash. Sort and view choices persist across restarts.
+- Quick sheets opens a fresh page in the same scratch notebook each time,
+  preserving earlier pages, even if the notebook was renamed or moved.
+- **Notebook** in the library toolbar opens a drawing page immediately with the pen selected.
   Tap the document title to rename it. Pen options and other context menus open
   in compact popovers over the page; tap outside to dismiss without leaving ink.
 - Six pen nibs (ballpoint, fineliner, marker, pencil, mechanical, calligraphy),
@@ -29,7 +32,7 @@ No account is required.
 - Responsive portrait/landscape layout, fullscreen button and F11, fit-page or
   fit-width view, finger scrolling, optional finger drawing and pen proximity
   suppression of palm gestures.
-- Rounded buttons with centered labels and pill-shaped library filters.
+- Rounded controls with centered labels and a monochrome navigation sidebar.
 - Monochrome vector toolbar and menu icons, embedded in the app and crisp at
   every display scale; no system icon theme is required.
 - Battery percentage and charging indicator, Wi-Fi connection status and
@@ -47,6 +50,24 @@ No account is required.
   Fullscreen switches the current window and remembers the preference.
   Rapid hardware adjustments keep the latest value; writes are checked and
   rolled back on failure. **Done** closes settings after pending writes finish.
+
+## Interface reference and roadmap
+
+The [feature and UI inventory](docs/remarkable-reference.md) links the official
+reMarkable guides and illustrations, compares their workflows with PinePaper,
+and separates implemented features from planned work. The first phase (0.5.0)
+implements the library layout requested in the reference photograph.
+
+![PinePaper library](docs/images/library-landscape.png)
+
+Use **Menu** for file-type filters, import, sharing, settings, backups and trash.
+Tap **Folder** to create a folder, **Notebook** to open a new drawing page, or
+**Quick sheets** for a fresh page in your scratch notebook. The icon beside the
+sort dropdown switches between grid and list. Scroll with a finger or mouse
+wheel; open an item's three-dot menu to rename, move or trash it. Wi-Fi and
+battery status remain visible at the bottom. Quick sheets creates a new scratch
+notebook if its previous one is in the trash; it never restores deleted files
+implicitly. No library migration is needed for this update.
 
 ## Install and start
 
@@ -72,16 +93,16 @@ sudo zypper install ./pinepaper-*.rpm
 ```
 
 Start **PinePaper** from the application launcher, or run `pinepaper` in a
-terminal inside your Wayland session. Choose **Create → Notebook** to start
-writing. Tap its title to rename it; **Create → Import** adds an existing file.
-Changes save automatically. **Settings** includes display controls, keyboard
+terminal inside your Wayland session. Choose **Notebook** in the library toolbar to start
+writing. Tap its title to rename it; **Menu → Import** adds an existing file.
+Changes save automatically. **Menu → Settings** includes display controls, keyboard
 preferences and the exchange server URL. The fullscreen button or F11 toggles
 fullscreen; the preference is remembered.
 
 Alternative formats:
 
 - **AppImage:** from the same artifact, run `chmod +x PinePaper-*.AppImage`,
-  then `./PinePaper-0.4.0-x86_64.AppImage` (substitute `aarch64` on ARM).
+  then `./PinePaper-0.5.0-x86_64.AppImage` (substitute `aarch64` on ARM).
   If FUSE is unavailable, prefix the launch with `APPIMAGE_EXTRACT_AND_RUN=1`.
 - **Flatpak:** download the matching `flatpak-x86_64` or `flatpak-aarch64`
   artifact, verify its checksums, then run the commands below. The separate
@@ -93,7 +114,7 @@ Alternative formats:
 
 ```sh
 flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install --user ./PinePaper-0.4.0-x86_64.flatpak
+flatpak install --user ./PinePaper-0.5.0-x86_64.flatpak
 flatpak run eu.pinepaper.PinePaper.Rust
 ```
 
@@ -216,7 +237,7 @@ Ctrl+Q quit. Escape dismisses an open dialog.
 Set **Settings → Sharing → Exchange server** to your server's `https://` URL
 (or `http://` for a trusted local test). Every participant uses the same server.
 Open a document, choose **Page menu → Share document → Share current document**,
-and give the five-character code to others. They choose **Create → Join shared
+and give the five-character code to others. They choose **Menu → Join shared
 document** and enter the code. The sharing screen displays the code and participant
 count; the page footer shows connection status. Use **Leave sharing** to disconnect.
 Opening another document also leaves the current session.
@@ -343,11 +364,11 @@ under `usr/share/licenses/pinepaper/third-party/`.
 Use the ARM64 Arch package on PineNote:
 
 ```sh
-sudo pacman -U pinepaper-0.4.0-1-aarch64.pkg.tar.zst
+sudo pacman -U pinepaper-0.5.0-1-aarch64.pkg.tar.zst
 ```
 
 The source `packaging/PKGBUILD` supports x86_64 and aarch64 after a matching
-`v0.4.0` tag exists. Before that tag exists, use Cargo/nFPM directly. For local
+`v0.5.0` tag exists. Before that tag exists, use Cargo/nFPM directly. For local
 package builds, install Python 3, binutils, curl, tar and zstd, then run:
 
 ```sh

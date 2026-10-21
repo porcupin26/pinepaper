@@ -257,12 +257,17 @@ impl Store {
         trash: bool,
     ) -> Result<Vec<Document>> {
         let order = [
-            "MAX(opened,updated) DESC",
+            "opened DESC,updated DESC",
             "title COLLATE NOCASE",
             "created DESC",
-        ][sort.min(2)];
-        let mut stmt = self.db.prepare(&format!("SELECT * FROM documents WHERE trashed=? AND (? OR parent IS ?) AND (?='' OR kind=?) ORDER BY {order}"))?;
-        let rows = stmt.query_map(params![trash, trash, parent, kind, kind], document)?;
+            "updated DESC",
+            "kind,title COLLATE NOCASE",
+        ][sort.min(4)];
+        let mut stmt = self.db.prepare(&format!("SELECT * FROM documents WHERE trashed=? AND (? OR ?!='' OR ?!='' OR parent IS ?) AND (?='' OR kind=?) ORDER BY {order}"))?;
+        let rows = stmt.query_map(
+            params![trash, trash, kind, query, parent, kind, kind],
+            document,
+        )?;
         Ok(rows
             .collect::<rusqlite::Result<Vec<_>>>()?
             .into_iter()

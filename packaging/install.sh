@@ -10,3 +10,6 @@ install -Dm644 packaging/eu.pinepaper.PinePaper.Rust.metainfo.xml "$dest$prefix/
 install -Dm644 LICENSE "$dest$prefix/share/licenses/pinepaper/LICENSE"
 install -Dm644 assets/FONT-LICENSE.txt "$dest$prefix/share/licenses/pinepaper/FONT-LICENSE.txt"
 install -Dm644 README.md "$dest$prefix/share/doc/pinepaper/README.md"
+for file in docs/remarkable-reference.md docs/images/*.png; do
+  install -Dm644 "$file" "$dest$prefix/share/doc/pinepaper/$file"
+done
