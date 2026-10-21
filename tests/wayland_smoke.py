@@ -122,6 +122,32 @@ def main():
                     assert len(payload['strokes']) == 2, payload
                     assert payload['strokes'][-1]['diagram_shape'] == 'Arrow', payload
                     subprocess.run(['grim', str(output / 'diagram.png')], env=env, check=True)
+                    click(34,426)  # Select, below Diagram.
+                    click(322,443)  # Select the arrow shaft.
+                    subprocess.run(['grim',str(output / 'selected-arrow.png')],env=env,check=True)
+                    original=payload['strokes'][-1]['points'][:2]
+                    point('move 395 487 936 702')
+                    point('down')
+                    for i in range(1,22):
+                        point(f'move {395+i*5} {487+i*3} 936 702')
+                    point('up')
+                    time.sleep(.4)
+                    assert app.poll() is None, 'App exited while dragging an endpoint; see app.log'
+                    edited=json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])['strokes'][-1]['points'][:2]
+                    assert edited[0] == original[0], (edited,original)
+                    assert edited[1][0] > original[1][0]+80 and edited[1][1] > original[1][1]+40
+                    subprocess.run(['grim',str(output / 'edited-arrow.png')],env=env,check=True)
+                    point('move 375 475 936 702')
+                    point('down')
+                    point('move 405 505 936 702')
+                    point('up')
+                    time.sleep(.4)
+                    moved=json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])['strokes'][-1]['points'][:2]
+                    assert abs((moved[0][0]-edited[0][0])-(moved[1][0]-edited[1][0])) < 1e-8
+                    assert moved[0][0] > edited[0][0]+20 and moved[0][1] > edited[0][1]+20
+                    key('-M','ctrl','z','-m','ctrl')
+                    restored=json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])['strokes'][-1]['points'][:2]
+                    assert restored == edited
                     sway('output HEADLESS-1 transform 90')
                     time.sleep(.5)
                     subprocess.run(['grim', str(output / 'portrait.png')], env=env, check=True)
@@ -142,7 +168,7 @@ def main():
                     db.close()
                 (output / 'result.json').write_text(json.dumps({'passed': True,
                     'checks': ['native Wayland launch', 'Notebook toolbar action opens drawing immediately', 'optional title rename', 'pointer ink persisted', 'pen popup and outside dismissal without ink',
-                               'hold tool label', 'diagram palette and persisted arrow', 'rotation', 'draft preserved across rotation', 'fullscreen', 'clean close']}, indent=2))
+                               'hold tool label', 'diagram palette and persisted arrow', 'Select and endpoint handles', 'move arrow body and undo', 'rotation', 'draft preserved across rotation', 'fullscreen', 'clean close']}, indent=2))
                 print('Headless Wayland checks passed')
             finally:
                 if pointer:

@@ -178,15 +178,33 @@ fn smoke_test(output: PathBuf) -> Result<()> {
             .save_png(&output.join(format!("diagram-menu-{label}.png")))?;
         a.act(Action::Shape(pinepaper::diagram::Shape::Arrow));
         a.render();
-        let start = a.view.screen([180., 560., 0.5]);
-        let end = a.view.screen([500., 700., 0.5]);
+        let start = a.view.screen([180., 420., 0.5]);
+        let end = a.view.screen([500., 490., 0.5]);
         a.down(start[0], start[1], 0.5, false);
         a.motion(end[0], end[1], 0.5);
         a.up(end[0], end[1]);
         a.render();
         a.surface
             .save_png(&output.join(format!("diagram-{label}.png")))?;
-        a.act(Action::Undo);
+        a.act(Action::Tool("select".into()));
+        a.render();
+        let center = a.view.screen([340., 455., 0.5]);
+        a.down(center[0], center[1], 0.5, false);
+        a.up(center[0], center[1]);
+        a.render();
+        a.surface
+            .save_png(&output.join(format!("selected-arrow-{label}.png")))?;
+        let end = a.view.screen([500., 490., 0.5]);
+        let next = a.view.screen([560., 410., 0.5]);
+        a.down(end[0], end[1], 0.5, false);
+        a.render();
+        a.motion(next[0], next[1], 0.5);
+        a.up(next[0], next[1]);
+        a.render();
+        a.surface
+            .save_png(&output.join(format!("edited-arrow-{label}.png")))?;
+        a.act(Action::Undo); // Endpoint change.
+        a.act(Action::Undo); // Original diagram.
         a.store.set("quick_sheets", &Some(&id))?;
         a.act(Action::MakeNotebook);
         a.act(Action::SelectPages(true));

@@ -262,3 +262,39 @@ fn diagram_objects_roundtrip_share_and_undo_as_one_object() {
     merge(&mut b, &a.undo(true));
     assert_eq!(values(&mut b)[0].strokes.len(), 1);
 }
+
+#[test]
+fn endpoint_edits_update_the_same_shared_object_and_undo_cleanly() {
+    use pinepaper::diagram::{self, Shape};
+    let (doc, mut pages) = fixture();
+    pages[0].payload.strokes.push(Shape::DoubleArrow.stroke(
+        [120., 200., 0.5],
+        [400., 200., 0.5],
+        2.4,
+        0.07,
+    ));
+    let mut a = Replica::from_local(&doc, &mut pages).unwrap();
+    let original = pages[0].payload.strokes[0].clone();
+    let mut b = Replica::from_shared(a.state.clone()).unwrap();
+    pages[0].payload.strokes[0] = diagram::with_endpoint(&original, 1, [500., 350., 0.5]).unwrap();
+    let changes = a.capture(&doc.title, &mut pages, false).unwrap();
+    assert_eq!(changes.len(), 1, "An endpoint edit updates one object");
+    merge(&mut b, &changes);
+    let received = values(&mut b);
+    assert_eq!(received[0].strokes.len(), 1);
+    assert_eq!(received[0].strokes[0].extra, original.extra);
+    assert_eq!(
+        diagram::endpoints(&received[0].strokes[0]).unwrap(),
+        [[120., 200., 0.5], [500., 350., 0.5]]
+    );
+    merge(&mut b, &a.undo(false));
+    assert_eq!(
+        diagram::endpoints(&values(&mut b)[0].strokes[0]),
+        diagram::endpoints(&original)
+    );
+    merge(&mut b, &a.undo(true));
+    assert_eq!(
+        diagram::endpoints(&values(&mut b)[0].strokes[0]).unwrap()[1],
+        [500., 350., 0.5]
+    );
+}

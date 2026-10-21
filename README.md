@@ -24,6 +24,9 @@ No account is required.
 - Diagram palette: drag to create lines, arrows, double arrows, rectangles,
   squares, ellipses, circles and diamonds. Each shape is one selectable ink
   object, with a live preview, line weight and grayscale colour.
+- **Select** tool: tap an object or a shape's interior, then drag it to move it.
+  Lines and arrows expose two endpoint handles; moving either handle rebuilds
+  the line and arrowheads. Existing diagrams work without a library migration.
 - Undo/redo, automatic saving after pen-up, page insertion/deletion, six paper
   templates, bookmarks, tags and page overview.
 - PDF, text EPUB and UTF-8 text import. Originals are copied into the library.
@@ -81,15 +84,27 @@ implicitly. No library migration is needed for this update.
 Hold a toolbar icon for roughly **0.55 seconds** to see its name. Release it
 without triggering the command; tap normally to use it. Add page and templates
 appear only in notebooks. Undo/Redo appear when there is a change to reverse,
-and Delete selection appears after selecting objects with the lasso.
+and Delete selection appears after selecting objects with Select or Lasso.
 
 Tap the **Diagram** icon below Text. Choose a shape, then drag from one corner
 to another (or from tail to tip for an arrow). Squares and circles keep equal
 width and height. Tap Diagram again to change the shape, line weight or colour.
-Use the lasso to move or delete the whole shape, the eraser to erase it, and
-Undo/Redo to reverse changes. Shapes save automatically and work in PDF exports
-and live sharing. This first version has fixed geometry: resizing handles,
-attached connectors, automatic routing and shape recognition are not included.
+Tap **Select**, the pointer icon below Diagram, to select a shape, an ink stroke
+or a text object. Drag its body to move it; tap empty space to deselect. You can
+also select and move in one drag. Select works with the pen or a finger, even
+when finger drawing is disabled; palm suppression still applies near the pen.
+
+A selected **line, arrow or double arrow** shows a circular handle at each end.
+Drag one handle to change that end while the opposite end stays fixed. Drag the
+shaft to move both ends together. Arrowheads follow the new direction. Handles
+stay the same screen size in portrait, landscape and fit-page views. Small tap
+movements do not edit the document. Select also edits diagrams saved by 0.6.0.
+
+Use **Lasso** to surround and move several objects together. Delete selection or
+the eraser removes objects, and Undo/Redo reverses edits. Changes save on release
+and work in PDF exports and live sharing. Object drags repaint the affected page
+region, preserving overlapping ink and display contrast. General shape resizing,
+attached connectors, automatic routing and shape recognition remain planned.
 
 To organize Quick sheets, open **Page overview → Make notebook**, or choose
 **Make notebook from pages** in the page menu or the item's library menu. The
@@ -133,7 +148,7 @@ fullscreen; the preference is remembered.
 Alternative formats:
 
 - **AppImage:** from the same artifact, run `chmod +x PinePaper-*.AppImage`,
-  then `./PinePaper-0.6.0-x86_64.AppImage` (substitute `aarch64` on ARM).
+  then `./PinePaper-0.6.1-x86_64.AppImage` (substitute `aarch64` on ARM).
   If FUSE is unavailable, prefix the launch with `APPIMAGE_EXTRACT_AND_RUN=1`.
 - **Flatpak:** download the matching `flatpak-x86_64` or `flatpak-aarch64`
   artifact, verify its checksums, then run the commands below. The separate
@@ -145,7 +160,7 @@ Alternative formats:
 
 ```sh
 flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install --user ./PinePaper-0.6.0-x86_64.flatpak
+flatpak install --user ./PinePaper-0.6.1-x86_64.flatpak
 flatpak run eu.pinepaper.PinePaper.Rust
 ```
 
@@ -395,11 +410,11 @@ under `usr/share/licenses/pinepaper/third-party/`.
 Use the ARM64 Arch package on PineNote:
 
 ```sh
-sudo pacman -U pinepaper-0.6.0-1-aarch64.pkg.tar.zst
+sudo pacman -U pinepaper-0.6.1-1-aarch64.pkg.tar.zst
 ```
 
 The source `packaging/PKGBUILD` supports x86_64 and aarch64 after a matching
-`v0.6.0` tag exists. Before that tag exists, use Cargo/nFPM directly. For local
+`v0.6.1` tag exists. Before that tag exists, use Cargo/nFPM directly. For local
 package builds, install Python 3, binutils, curl, tar and zstd, then run:
 
 ```sh

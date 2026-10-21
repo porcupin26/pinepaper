@@ -26,6 +26,12 @@ impl Shape {
         Self::Circle,
         Self::Diamond,
     ];
+    pub fn closed(self) -> bool {
+        matches!(
+            self,
+            Self::Rectangle | Self::Square | Self::Ellipse | Self::Circle | Self::Diamond
+        )
+    }
     pub fn label(self) -> &'static str {
         match self {
             Self::Line => "Line",
@@ -113,4 +119,32 @@ impl Shape {
             .insert("diagram_shape".into(), serde_json::json!(self));
         stroke
     }
+}
+
+/// No new file format: these fields were already written by the first diagram tool.
+pub fn shape(stroke: &Stroke) -> Option<Shape> {
+    serde_json::from_value(stroke.extra.get("diagram_shape")?.clone()).ok()
+}
+pub fn endpoints(stroke: &Stroke) -> Option<[Point; 2]> {
+    if matches!(
+        shape(stroke)?,
+        Shape::Line | Shape::Arrow | Shape::DoubleArrow
+    ) && stroke.points.len() >= 2
+    {
+        Some([stroke.points[0], stroke.points[1]])
+    } else {
+        None
+    }
+}
+pub fn with_endpoint(stroke: &Stroke, end: usize, point: Point) -> Option<Stroke> {
+    let mut ends = endpoints(stroke)?;
+    let previous = *ends.get(end)?;
+    if (previous[0] - point[0]).hypot(previous[1] - point[1]) < 1e-9 {
+        return Some(stroke.clone());
+    }
+    *ends.get_mut(end)? = point;
+    let geometry = shape(stroke)?.stroke(ends[0], ends[1], stroke.width, stroke.color);
+    let mut updated = stroke.clone();
+    updated.points = geometry.points;
+    Some(updated) // Keep shared object identity, style and all unknown metadata.
 }

@@ -1,3 +1,4 @@
+mod selection;
 mod sharing;
 mod tools;
 use crate::{
@@ -328,6 +329,8 @@ enum Gesture {
     Lasso(Vec<Point>),
     Move(Point, Payload),
     Text,
+    ObjectEdit(Box<selection::ObjectEdit>),
+    SelectEmpty,
 }
 enum Work {
     Import(PathBuf, Option<String>),
@@ -1321,7 +1324,7 @@ impl App {
                 self.dialog = Some(
                     Dialog::Message(
                         "PinePaper · Rust".into(),
-                        "Pen: write on contact. Tap active Pen for nib settings. Hold a toolbar icon to see its name. Lasso: surround ink, then drag it. Diagram: pick a shape, then drag on the page. Quick sheets: Page overview → Make notebook moves selected pages into a named notebook. Fingers scroll; palm gestures are suppressed near the pen.\n\nNotes save automatically after each stroke. Import PDF, EPUB and text from My files. Export PDF or back up the entire library as ZIP.\n\nF11 fullscreen · Ctrl+N new · Ctrl+O import · Ctrl+Z undo · Ctrl+Shift+Z redo · Page Up/Down · Escape tools · Ctrl+Q quit"
+                        "Pen: write on contact. Tap active Pen for nib settings. Hold a toolbar icon to see its name. Select: tap an object and drag its body to move it. Drag either circular handle on a selected line or arrow to move that endpoint. Lasso: surround several objects, then drag them. Diagram: pick a shape, then drag on the page. Quick sheets: Page overview → Make notebook moves selected pages into a named notebook. Fingers scroll; palm gestures are suppressed near the pen.\n\nNotes save automatically after each stroke. Import PDF, EPUB and text from My files. Export PDF or back up the entire library as ZIP.\n\nF11 fullscreen · Ctrl+N new · Ctrl+O import · Ctrl+Z undo · Ctrl+Shift+Z redo · Page Up/Down · Escape tools · Ctrl+Q quit"
                             .into(),
                     ),
                 );
@@ -2100,10 +2103,13 @@ impl App {
         if self.press.is_some() || self.dialog.is_some() || self.screen != Screen::Editor {
             return;
         }
-        if !self.view.contains(x, y) {
+        let on_handle = self.tool == "select"
+            && self.view.clip.contains(x, y)
+            && self.endpoint_hit(self.view.world(x, y, pressure)).is_some();
+        if !(self.view.contains(x, y) || on_handle) {
             return;
         }
-        if finger && !self.prefs.finger_draw {
+        if finger && !self.prefs.finger_draw && self.tool != "select" {
             return;
         }
         let p = self.view.world(x, y, pressure);
@@ -2146,6 +2152,7 @@ impl App {
                     self.gesture = Some(Gesture::Lasso(vec![p]));
                 }
             }
+            "select" => self.begin_select(p),
             "text" => {
                 self.gesture = Some(Gesture::Text);
             }
@@ -2245,7 +2252,8 @@ impl App {
                     self.redraw = true;
                 }
             }
-            Gesture::Text => (),
+            Gesture::ObjectEdit(edit) => self.move_object(edit, p),
+            Gesture::Text | Gesture::SelectEmpty => (),
         }
         self.gesture = Some(gesture);
     }
@@ -2258,7 +2266,10 @@ impl App {
             self.finger = false;
             return;
         }
-        if matches!(self.gesture, Some(Gesture::Diagram(..))) {
+        if matches!(
+            self.gesture,
+            Some(Gesture::Diagram(..) | Gesture::ObjectEdit(_))
+        ) {
             self.motion(x, y, 0.5);
         }
         let moved = (x - self.press_start.0).hypot(y - self.press_start.1);
@@ -2361,6 +2372,15 @@ impl App {
                 }
                 self.redraw = true;
             }
+            Gesture::ObjectEdit(edit) => {
+                if self.page().is_some_and(|p| p.payload != edit.original) {
+                    self.remember_changed(&edit.original);
+                    if let Err(e) = self.save() {
+                        self.fail(e);
+                    }
+                }
+            }
+            Gesture::SelectEmpty => (),
             Gesture::Lasso(poly) => {
                 if let Some(p) = self.page() {
                     self.selection = Selection {
@@ -2415,19 +2435,17 @@ impl App {
         if let Some(p) = self.page() {
             for &i in &self.selection.strokes {
                 if let Some(s) = p.payload.strokes.get(i) {
-                    points.extend(s.points.iter().copied());
+                    let pad = (s.width * 4.).max(1.);
+                    for p in &s.points {
+                        points.push([p[0] - pad, p[1] - pad, 0.]);
+                        points.push([p[0] + pad, p[1] + pad, 0.]);
+                    }
                 }
             }
             for &i in &self.selection.texts {
                 if let Some(t) = p.payload.texts.get(i) {
-                    points.extend([
-                        [t.x, t.y, 0.],
-                        [
-                            t.x + (t.text.chars().count() as f64 * t.size * 0.6).min(300.),
-                            t.y + t.size * 1.5,
-                            0.,
-                        ],
-                    ]);
+                    let b = self.surface.text_bounds(t);
+                    points.extend([[b.x, b.y, 0.], [b.x + b.w, b.y + b.h, 0.]]);
                 }
             }
         }

@@ -1,4 +1,4 @@
-use crate::model::{Payload, Point, Stroke, PAGE_H, PAGE_W};
+use crate::model::{Payload, Point, Stroke, Text, PAGE_H, PAGE_W};
 use fontdue::{
     layout::{CoordinateSystem, Layout, LayoutSettings, TextStyle},
     Font, FontSettings,
@@ -192,12 +192,18 @@ impl Surface {
     pub fn rounded(&mut self, b: Box2, radius: f64, color: u32) {
         let r = radius.min(b.w / 2.).min(b.h / 2.);
         let bounds = self.rect(b);
+        // A circle has a zero-width center range. Avoid inverted clamp bounds
+        // when fractional positions round x+r and x+w-r differently.
+        let min_x = b.x + r;
+        let max_x = (b.x + b.w - r).max(min_x);
+        let min_y = b.y + r;
+        let max_y = (b.y + b.h - r).max(min_y);
         for y in bounds.y..bounds.bottom {
             for x in bounds.x..bounds.right {
                 let px = (x as f64 + 0.5) / self.scale;
                 let py = (y as f64 + 0.5) / self.scale;
-                let cx = px.clamp(b.x + r, b.x + b.w - r);
-                let cy = py.clamp(b.y + r, b.y + b.h - r);
+                let cx = px.clamp(min_x, max_x);
+                let cy = py.clamp(min_y, max_y);
                 let alpha = ((r - (px - cx).hypot(py - cy)) * self.scale + 0.5).clamp(0., 1.);
                 let i = y * self.width + x;
                 self.pixels[i] = blend(self.pixels[i], color, alpha);
@@ -517,6 +523,70 @@ impl Surface {
             }
         }
         self.clip = old;
+    }
+    /// Rebuild only the dirty region, preserving raw pixels outside it and draw order.
+    pub fn repaint_page_region(
+        &mut self,
+        view: View,
+        payload: &Payload,
+        pdf: Option<&image::RgbImage>,
+        region: Box2,
+    ) -> Rect {
+        let old_clip = self.clip;
+        self.clip = view.clip;
+        let rect = self.rect(region);
+        if rect.x >= rect.right || rect.y >= rect.bottom {
+            self.clip = old_clip;
+            return rect;
+        }
+        let clip = Box2::new(
+            rect.x as f64 / self.scale,
+            rect.y as f64 / self.scale,
+            (rect.right - rect.x) as f64 / self.scale,
+            (rect.bottom - rect.y) as f64 / self.scale,
+        );
+        let lut = self.tone_lut.take();
+        self.clip = clip;
+        self.fill(clip, BACK);
+        self.page(View { clip, ..view }, payload, pdf, true);
+        if let Some(table) = &lut {
+            for y in rect.y..rect.bottom {
+                for x in rect.x..rect.right {
+                    let i = y * self.width + x;
+                    self.raw[i] = self.pixels[i];
+                    self.pixels[i] = toned(self.pixels[i], table);
+                }
+            }
+        }
+        self.tone_lut = lut;
+        self.clip = old_clip;
+        rect
+    }
+    pub fn text_bounds(&self, text: &Text) -> Box2 {
+        let serif = text.font == "Serif";
+        let mut layout = Layout::new(CoordinateSystem::PositiveYDown);
+        layout.reset(&LayoutSettings {
+            x: text.x as f32,
+            y: text.y as f32,
+            max_width: Some((PAGE_W - text.x - 24.).max(1.) as f32),
+            line_height: if serif { 1.28 } else { 1.0 },
+            ..LayoutSettings::default()
+        });
+        layout.append(
+            &self.fonts,
+            &TextStyle::new(&text.text, text.size as f32, usize::from(serif)),
+        );
+        let right = layout
+            .glyphs()
+            .iter()
+            .map(|g| g.x as f64 + g.width as f64)
+            .fold(text.x, f64::max);
+        Box2::new(
+            text.x,
+            text.y,
+            (right - text.x).max(1.),
+            (layout.height() as f64).max(text.size),
+        )
     }
     fn template(&mut self, v: View, name: &str) {
         let line = |s: &mut Self, x: f64, y: f64, xx: f64, yy: f64| {

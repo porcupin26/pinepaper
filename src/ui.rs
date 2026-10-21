@@ -330,18 +330,7 @@ fn editor(a: &mut App) {
     }
     a.surface
         .tone(clip, a.prefs.page_contrast, a.prefs.page_gamma);
-    if let Some(b) = a.selection.bounds {
-        a.surface.border(
-            Box2::new(
-                v.x + b.x * v.zoom,
-                v.y + b.y * v.zoom,
-                b.w * v.zoom,
-                b.h * v.zoom,
-            ),
-            GRAY,
-            1.,
-        );
-    }
+    selection_overlay(a);
     top(a, "PINEPAPER");
     if !a.hidden {
         a.surface.fill(Box2::new(0., 93., w, 1.), LINE);
@@ -400,6 +389,33 @@ fn editor(a: &mut App) {
         a.hits.push((b, Action::Next));
     }
 }
+pub fn selection_overlay(a: &mut App) {
+    let v = a.view;
+    let old = a.surface.clip;
+    a.surface.clip = v.clip;
+    if let Some(b) = a.selection.bounds {
+        a.surface.border(
+            Box2::new(
+                v.x + b.x * v.zoom,
+                v.y + b.y * v.zoom,
+                b.w * v.zoom,
+                b.h * v.zoom,
+            ),
+            GRAY,
+            1.,
+        );
+    }
+    if let Some(ends) = a.selected_endpoints() {
+        for p in ends {
+            let q = v.screen(p);
+            a.surface
+                .rounded(Box2::new(q[0] - 7., q[1] - 7., 14., 14.), 7., BLACK);
+            a.surface
+                .rounded(Box2::new(q[0] - 5., q[1] - 5., 10., 10.), 5., WHITE);
+        }
+    }
+    a.surface.clip = old;
+}
 fn editor_tools(a: &mut App) {
     let h = a.surface.logical_h;
     let mut y = 104.;
@@ -410,6 +426,7 @@ fn editor_tools(a: &mut App) {
         (Icon::Lasso, "lasso"),
         (Icon::Text, "text"),
         (Icon::Diagram, "diagram"),
+        (Icon::Select, "select"),
     ] {
         icon_button(
             a,
@@ -465,7 +482,8 @@ pub fn action_label(action: &Action) -> Option<&str> {
             "pen" => "Pen",
             "highlighter" => "Highlighter",
             "eraser" => "Eraser",
-            "lasso" => "Select and move",
+            "lasso" => "Lasso",
+            "select" => "Select",
             "text" => "Text",
             "diagram" => "Diagram",
             _ => return None,
@@ -1010,8 +1028,26 @@ fn diagram_popup(a: &mut App) {
         let selected = a.diagram_shape == *shape;
         let color = button_chrome(a, row, Action::Shape(*shape), selected);
         let stroke = shape.stroke(
-            [row.x + 8., row.y + 10., 0.5],
-            [row.x + 30., row.y + 32., 0.5],
+            [
+                row.x + 8.,
+                row.y
+                    + if matches!(shape, Shape::Rectangle | Shape::Ellipse) {
+                        14.
+                    } else {
+                        10.
+                    },
+                0.5,
+            ],
+            [
+                row.x + 30.,
+                row.y
+                    + if matches!(shape, Shape::Rectangle | Shape::Ellipse) {
+                        28.
+                    } else {
+                        32.
+                    },
+                0.5,
+            ],
             1.4,
             (color & 255) as f64 / 255.,
         );
