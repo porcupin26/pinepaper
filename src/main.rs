@@ -172,7 +172,30 @@ fn smoke_test(output: PathBuf) -> Result<()> {
         a.render();
         a.surface
             .save_png(&output.join(format!("notebook-{label}.png")))?;
+        a.act(Action::Tool("diagram".into()));
+        a.render();
+        a.surface
+            .save_png(&output.join(format!("diagram-menu-{label}.png")))?;
+        a.act(Action::Shape(pinepaper::diagram::Shape::Arrow));
+        a.render();
+        let start = a.view.screen([180., 560., 0.5]);
+        let end = a.view.screen([500., 700., 0.5]);
+        a.down(start[0], start[1], 0.5, false);
+        a.motion(end[0], end[1], 0.5);
+        a.up(end[0], end[1]);
+        a.render();
+        a.surface
+            .save_png(&output.join(format!("diagram-{label}.png")))?;
+        a.act(Action::Undo);
+        a.store.set("quick_sheets", &Some(&id))?;
+        a.act(Action::MakeNotebook);
+        a.act(Action::SelectPages(true));
+        a.render();
+        a.surface
+            .save_png(&output.join(format!("move-pages-{label}.png")))?;
+        a.act(Action::CancelPageSelection);
         a.act(Action::Tool("pen".into()));
+        a.act(Action::PenPanel);
         a.render();
         a.surface
             .save_png(&output.join(format!("pen-menu-{label}.png")))?;

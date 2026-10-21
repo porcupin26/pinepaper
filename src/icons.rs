@@ -26,6 +26,7 @@ pub enum Icon {
     Eraser,
     Lasso,
     Text,
+    Diagram,
     Undo,
     Redo,
     Download,
@@ -64,6 +65,12 @@ impl Icon {
             mirror: matches!(self, Self::Next | Self::Redo),
         };
         match self {
+            Self::Diagram => {
+                p.rect(2., 2., 8., 7.);
+                p.path(&[(6., 9.), (6., 17.), (14., 17.)]);
+                p.path(&[(11., 14.), (14., 17.), (11., 20.)]);
+                p.arc((19., 17.), (4., 4.), 0., TAU);
+            }
             Self::Share => {
                 p.path(&[(8., 11.), (16., 6.)]);
                 p.path(&[(8., 13.), (16., 18.)]);

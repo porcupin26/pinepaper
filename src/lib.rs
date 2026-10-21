@@ -1,4 +1,5 @@
 pub mod app;
+pub mod diagram;
 pub mod document;
 pub mod exchange;
 pub mod icons;

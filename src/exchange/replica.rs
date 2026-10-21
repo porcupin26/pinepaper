@@ -406,6 +406,17 @@ impl Replica {
                 .collect::<Vec<_>>(),
         )
     }
+    pub fn can_undo(&self, redo: bool) -> bool {
+        let stack = if redo { &self.redo } else { &self.undo };
+        stack.iter().any(|entry| {
+            entry.iter().any(|change| {
+                self.state
+                    .cells
+                    .get(&change.key)
+                    .is_some_and(|c| c.stamp == change.expected)
+            })
+        })
+    }
     pub fn undo(&mut self, redo: bool) -> Vec<Change> {
         let entry = if redo {
             self.redo.pop()
@@ -434,6 +445,9 @@ impl Replica {
                     self.redo.push(inverse);
                 }
             }
+        }
+        if changes.is_empty() && self.can_undo(redo) {
+            return self.undo(redo);
         }
         changes
     }

@@ -308,6 +308,65 @@ impl Store {
         tx.commit()?;
         Ok(id)
     }
+    pub fn move_pages_to_notebook(
+        &mut self,
+        source: &str,
+        selected: &[String],
+        title: &str,
+    ) -> Result<String> {
+        let doc = self.document(source)?;
+        let title: String = title.trim().chars().take(240).collect();
+        let pages = self.pages(source)?;
+        let chosen: std::collections::BTreeSet<_> = selected.iter().collect();
+        anyhow::ensure!(
+            doc.kind == "notebook" && !doc.trashed,
+            "Open an active notebook first"
+        );
+        anyhow::ensure!(!title.is_empty(), "Please enter a name");
+        anyhow::ensure!(
+            !chosen.is_empty()
+                && chosen.len() == selected.len()
+                && chosen.iter().all(|id| pages.iter().any(|p| &p.id == *id)),
+            "Some selected pages are no longer available"
+        );
+        let id = identifier();
+        let tx = self.db.transaction()?;
+        tx.execute("INSERT INTO documents(id,title,kind,parent,created,updated) VALUES(?,?,'notebook',?,?,?)",
+            params![id,title,doc.parent,now(),now()])?;
+        let (mut moved, mut remaining) = (0, 0);
+        for page in &pages {
+            let (target, position) = if chosen.contains(&page.id) {
+                let position = moved;
+                moved += 1;
+                (&id, position)
+            } else {
+                let position = remaining;
+                remaining += 1;
+                (&doc.id, position)
+            };
+            tx.execute(
+                "UPDATE pages SET document=?,position=? WHERE id=?",
+                params![target, position as i64, page.id],
+            )?;
+        }
+        if remaining == 0 {
+            tx.execute(
+                "INSERT INTO pages(id,document,position,payload) VALUES(?,?,0,?)",
+                params![
+                    identifier(),
+                    source,
+                    serde_json::to_string(&Payload::blank("Blank"))?
+                ],
+            )?;
+            remaining = 1;
+        }
+        tx.execute(
+            "UPDATE documents SET current_page=?,updated=? WHERE id=?",
+            params![doc.current_page.min(remaining - 1) as i64, now(), source],
+        )?;
+        tx.commit()?;
+        Ok(id)
+    }
     pub fn pages(&self, id: &str) -> Result<Vec<Page>> {
         let mut stmt = self.db.prepare("SELECT id,document,position,payload,bookmarked,tags FROM pages WHERE document=? ORDER BY position")?;
         let rows = stmt.query_map([id], |r| {
@@ -578,6 +637,12 @@ pub struct History {
     redo: Vec<Payload>,
 }
 impl History {
+    pub fn can_undo(&self, current: &Payload) -> bool {
+        self.undo.iter().any(|p| p != current)
+    }
+    pub fn can_redo(&self, current: &Payload) -> bool {
+        self.redo.iter().any(|p| p != current)
+    }
     pub fn push(&mut self, p: &Payload) {
         self.undo.push(p.clone());
         if self.undo.len() > 40 {
@@ -586,13 +651,19 @@ impl History {
         self.redo.clear();
     }
     pub fn undo(&mut self, p: &mut Payload) {
-        if let Some(prev) = self.undo.pop() {
-            self.redo.push(std::mem::replace(p, prev));
+        while let Some(prev) = self.undo.pop() {
+            if prev != *p {
+                self.redo.push(std::mem::replace(p, prev));
+                break;
+            }
         }
     }
     pub fn redo(&mut self, p: &mut Payload) {
-        if let Some(next) = self.redo.pop() {
-            self.undo.push(std::mem::replace(p, next));
+        while let Some(next) = self.redo.pop() {
+            if next != *p {
+                self.undo.push(std::mem::replace(p, next));
+                break;
+            }
         }
     }
 }

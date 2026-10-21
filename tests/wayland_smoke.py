@@ -103,6 +103,25 @@ def main():
                     subprocess.run(['grim', str(output / 'pen-popup.png')], env=env, check=True)
                     click(650, 600)  # Dismiss outside; this must never ink the page.
                     assert len(json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])['strokes']) == 1
+                    point('move 34 376 936 702')
+                    point('down')
+                    time.sleep(.7)
+                    subprocess.run(['grim', str(output / 'tool-label.png')], env=env, check=True)
+                    point('up')
+                    time.sleep(1.1)
+                    click(34, 376)  # Diagram palette.
+                    subprocess.run(['grim', str(output / 'diagram-menu.png')], env=env, check=True)
+                    click(340, 389)  # Arrow in the landscape popover's first row.
+                    point('move 250 400 936 702')
+                    point('down')
+                    for i in range(30):
+                        point(f'move {250+i*5} {400+i*3} 936 702')
+                    point('up')
+                    time.sleep(.5)
+                    payload=json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])
+                    assert len(payload['strokes']) == 2, payload
+                    assert payload['strokes'][-1]['diagram_shape'] == 'Arrow', payload
+                    subprocess.run(['grim', str(output / 'diagram.png')], env=env, check=True)
                     sway('output HEADLESS-1 transform 90')
                     time.sleep(.5)
                     subprocess.run(['grim', str(output / 'portrait.png')], env=env, check=True)
@@ -123,7 +142,7 @@ def main():
                     db.close()
                 (output / 'result.json').write_text(json.dumps({'passed': True,
                     'checks': ['native Wayland launch', 'Notebook toolbar action opens drawing immediately', 'optional title rename', 'pointer ink persisted', 'pen popup and outside dismissal without ink',
-                               'rotation', 'draft preserved across rotation', 'fullscreen', 'clean close']}, indent=2))
+                               'hold tool label', 'diagram palette and persisted arrow', 'rotation', 'draft preserved across rotation', 'fullscreen', 'clean close']}, indent=2))
                 print('Headless Wayland checks passed')
             finally:
                 if pointer:

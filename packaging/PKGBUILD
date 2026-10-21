@@ -1,6 +1,6 @@
 # Build natively on x86_64 Arch or aarch64 Arch Linux ARM / PineNote.
 pkgname=pinepaper
-pkgver=0.5.1
+pkgver=0.6.0
 pkgrel=1
 pkgdesc='Native notebook and PDF/EPUB reader for PineNote and Wayland'
 arch=('x86_64' 'aarch64')

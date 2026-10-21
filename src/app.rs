@@ -1,9 +1,11 @@
 mod sharing;
+mod tools;
 use crate::{
+    diagram::Shape,
     document,
     model::*,
     platform::{self, Hardware, Prefs, Status},
-    render::{Box2, Rect, Surface, View},
+    render::{Box2, Rect, Surface, SurfaceSnapshot, View},
     ui,
 };
 use anyhow::{Context, Result};
@@ -29,6 +31,12 @@ pub enum Action {
     LibraryView,
     ClearSearch,
     QuickSheets,
+    MakeNotebook,
+    MakeNotebookFrom(String),
+    SelectPage(String),
+    SelectPages(bool),
+    NameNotebook,
+    CancelPageSelection,
     Open(String),
     Up,
     Filter(String),
@@ -53,6 +61,8 @@ pub enum Action {
     Tools,
     Tool(String),
     PenPanel,
+    DiagramPanel,
+    Shape(Shape),
     Pen(String),
     Width(f64),
     Color(f64),
@@ -113,6 +123,7 @@ pub enum Action {
 }
 #[derive(Clone, Debug)]
 pub enum InputPurpose {
+    NotebookFromPages(String, Vec<String>),
     ExchangeUrl,
     JoinCode,
     Create(String),
@@ -293,6 +304,7 @@ pub enum Dialog {
     Sharing,
     Menu(String, Vec<(String, Action)>),
     PenPanel,
+    DiagramPanel,
     Input(Input),
     Settings(Box<Settings>),
     Message(String, String),
@@ -311,7 +323,8 @@ pub struct Selection {
 }
 enum Gesture {
     Ink(Stroke),
-    Erase(Point),
+    Diagram(Point, Stroke, SurfaceSnapshot),
+    Erase(Point, Payload),
     Lasso(Vec<Point>),
     Move(Point, Payload),
     Text,
@@ -364,6 +377,9 @@ pub struct App {
     pub index: usize,
     pub hidden: bool,
     pub tool: String,
+    pub diagram_shape: Shape,
+    pub page_selection: Option<std::collections::BTreeSet<String>>,
+    pub tool_tip: Option<(Box2, String)>,
     pub nib: Stroke,
     pub scroll: f64,
     pub fit: bool,
@@ -389,6 +405,9 @@ pub struct App {
     histories: HashMap<String, History>,
     gesture: Option<Gesture>,
     press: Option<Action>,
+    press_at: Instant,
+    long_pressed: bool,
+    tip_until: Option<Instant>,
     key_feedback: Vec<(Box2, Instant)>,
     control_drag: Option<ControlDrag>,
     press_start: (f64, f64),
@@ -488,6 +507,7 @@ impl App {
         let fullscreen = prefs.start_fullscreen;
         let library_list = store.setting("library_list", false);
         let library_sort = store.setting::<usize>("library_sort", 0).min(4);
+        let diagram_shape = store.setting("diagram_shape", Shape::default());
         let mut app = Self {
             sharing: None,
             surface: Surface::new(),
@@ -513,6 +533,9 @@ impl App {
             index: 0,
             hidden: false,
             tool: "pen".into(),
+            diagram_shape,
+            page_selection: None,
+            tool_tip: None,
             nib: Stroke::default(),
             scroll: 0.,
             fit: false,
@@ -543,6 +566,9 @@ impl App {
             histories: HashMap::new(),
             gesture: None,
             press: None,
+            press_at: Instant::now(),
+            long_pressed: false,
+            tip_until: None,
             key_feedback: Vec::new(),
             control_drag: None,
             press_start: (0., 0.),
@@ -584,7 +610,19 @@ impl App {
     }
     pub fn render(&mut self) {
         if self.redraw {
-            ui::render(self);
+            // A PDF load or other full repaint can change the page during a drag.
+            // Refresh the clean background before restoring the diagram preview.
+            if matches!(self.gesture, Some(Gesture::Diagram(..))) {
+                let mut gesture = self.gesture.take();
+                ui::render(self);
+                if let Some(Gesture::Diagram(_, stroke, background)) = &mut gesture {
+                    *background = self.surface.snapshot();
+                    self.surface.stroke(self.view, stroke);
+                }
+                self.gesture = gesture;
+            } else {
+                ui::render(self);
+            }
             self.damage = Some(self.surface.full_rect());
             self.redraw = false;
         }
@@ -633,6 +671,8 @@ impl App {
         ));
     }
     pub fn act(&mut self, action: Action) {
+        self.tool_tip = None;
+        self.tip_until = None;
         let keyboard_mode = self.keyboard_mode();
         if self.dialog.is_none() {
             self.popup_anchor = self
@@ -660,6 +700,9 @@ impl App {
         self.redraw = true;
     }
     fn action(&mut self, action: Action) -> Result<()> {
+        if !self.action_available(&action) {
+            return Ok(());
+        }
         match action {
             Action::None => {}
             Action::Library => {
@@ -813,6 +856,54 @@ impl App {
                 }
                 self.tool = "pen".into();
             }
+            Action::MakeNotebookFrom(id) => {
+                self.open(&id)?;
+                self.action(Action::MakeNotebook)?;
+            }
+            Action::MakeNotebook => {
+                self.flush()?;
+                self.page_selection = Some(self.page().map(|p| p.id.clone()).into_iter().collect());
+                self.overview_tab = "Pages".into();
+                self.overview_offset = 0;
+                self.screen = Screen::Overview;
+                self.dialog = None;
+            }
+            Action::SelectPage(id) => {
+                if let Some(selected) = &mut self.page_selection {
+                    if !selected.remove(&id) {
+                        selected.insert(id);
+                    }
+                }
+            }
+            Action::SelectPages(all) => {
+                self.page_selection = Some(if all {
+                    self.pages.iter().map(|p| p.id.clone()).collect()
+                } else {
+                    Default::default()
+                });
+            }
+            Action::NameNotebook => {
+                if let (Some(doc), Some(selected)) = (&self.doc, &self.page_selection) {
+                    let ids: Vec<_> = self
+                        .pages
+                        .iter()
+                        .filter(|p| selected.contains(&p.id))
+                        .map(|p| p.id.clone())
+                        .collect();
+                    if !ids.is_empty() {
+                        self.input(
+                            "Name the new notebook",
+                            "Notebook from Quick sheets".into(),
+                            InputPurpose::NotebookFromPages(doc.id.clone(), ids),
+                            false,
+                        );
+                    }
+                }
+            }
+            Action::CancelPageSelection => {
+                self.page_selection = None;
+                self.screen = Screen::Editor;
+            }
             Action::New(kind) if kind == "notebook" => {
                 self.flush()?;
                 let docs = self
@@ -942,7 +1033,11 @@ impl App {
             }
             Action::Tools => self.hidden = !self.hidden,
             Action::Tool(t) => {
-                if self.tool == t && t == "pen" {
+                if t == "diagram" {
+                    self.tool = t;
+                    self.selection = Selection::default();
+                    self.dialog = Some(Dialog::DiagramPanel);
+                } else if self.tool == t && t == "pen" {
                     self.action(Action::PenPanel)?;
                 } else {
                     self.tool = t;
@@ -951,6 +1046,14 @@ impl App {
             }
             Action::PenPanel => {
                 self.dialog = Some(Dialog::PenPanel);
+            }
+            Action::DiagramPanel => self.dialog = Some(Dialog::DiagramPanel),
+            Action::Shape(shape) => {
+                self.diagram_shape = shape;
+                self.store.set("diagram_shape", &shape)?;
+                self.tool = "diagram".into();
+                self.selection = Selection::default();
+                self.dialog = None;
             }
             Action::Pen(p) => {
                 self.nib.pen = p;
@@ -999,6 +1102,7 @@ impl App {
                 }
             }
             Action::Overview => {
+                self.page_selection = None;
                 self.screen = Screen::Overview;
                 self.overview_offset = 0;
             }
@@ -1012,6 +1116,7 @@ impl App {
                 self.overview_offset = 0;
             }
             Action::Page(i) => {
+                self.page_selection = None;
                 self.go(i)?;
                 self.screen = Screen::Editor;
             }
@@ -1063,6 +1168,10 @@ impl App {
                         ("Delete this page", Action::DeletePage),
                     ]);
                 }
+                if self.is_quick_sheets() {
+                    items.push(("Make notebook from pages", Action::MakeNotebook));
+                }
+                items.retain(|(_, action)| self.action_available(action));
                 self.menu("Page", items);
             }
             Action::TemplatePanel => {
@@ -1169,6 +1278,18 @@ impl App {
                     ("Rename", Action::Rename(id.clone())),
                     ("Move to folder", Action::Move(id.clone())),
                 ];
+                if !d.trashed
+                    && self
+                        .store
+                        .setting::<Option<String>>("quick_sheets", None)
+                        .as_ref()
+                        == Some(&id)
+                {
+                    items.push((
+                        "Make notebook from pages",
+                        Action::MakeNotebookFrom(id.clone()),
+                    ));
+                }
                 if d.trashed {
                     items.push(("Restore", Action::Trash(id, false)));
                 } else {
@@ -1200,7 +1321,7 @@ impl App {
                 self.dialog = Some(
                     Dialog::Message(
                         "PinePaper · Rust".into(),
-                        "Pen: write on contact. Tap active Pen for nib settings. Lasso: surround ink, then drag it. Fingers scroll; palm gestures are suppressed near the pen.\n\nNotes save automatically after each stroke. Import PDF, EPUB and text from My files. Export PDF or back up the entire library as ZIP.\n\nF11 fullscreen · Ctrl+N new · Ctrl+O import · Ctrl+Z undo · Ctrl+Shift+Z redo · Page Up/Down · Escape tools · Ctrl+Q quit"
+                        "Pen: write on contact. Tap active Pen for nib settings. Hold a toolbar icon to see its name. Lasso: surround ink, then drag it. Diagram: pick a shape, then drag on the page. Quick sheets: Page overview → Make notebook moves selected pages into a named notebook. Fingers scroll; palm gestures are suppressed near the pen.\n\nNotes save automatically after each stroke. Import PDF, EPUB and text from My files. Export PDF or back up the entire library as ZIP.\n\nF11 fullscreen · Ctrl+N new · Ctrl+O import · Ctrl+Z undo · Ctrl+Shift+Z redo · Page Up/Down · Escape tools · Ctrl+Q quit"
                             .into(),
                     ),
                 );
@@ -1484,6 +1605,16 @@ impl App {
         };
         let text = input.value.trim().to_string();
         match input.purpose {
+            InputPurpose::NotebookFromPages(source, ids) => {
+                self.flush()?;
+                let id = self.store.move_pages_to_notebook(&source, &ids, &text)?;
+                self.pages = self.store.pages(&source)?;
+                self.index = self.index.min(self.pages.len() - 1);
+                self.doc = Some(self.store.document(&source)?);
+                self.capture_shared(true)?;
+                self.page_selection = None;
+                self.open(&id)?;
+            }
             InputPurpose::ExchangeUrl => {
                 if !text.is_empty() {
                     crate::exchange::transport::endpoint(&text)?;
@@ -1636,6 +1767,7 @@ impl App {
         self.fit = self.hidden;
         let index = d.current_page.min(pages.len() - 1);
         self.doc = Some(d);
+        self.page_selection = None;
         self.pages = pages;
         self.screen = Screen::Editor;
         self.dialog = None;
@@ -1709,6 +1841,7 @@ impl App {
     }
     pub fn tick(&mut self) {
         self.expire_key_feedback(Instant::now());
+        self.update_tooltip(Instant::now());
         self.poll_exchange();
         if let Ok((stream, _)) = self.activation.accept() {
             use std::io::Read;
@@ -1921,6 +2054,12 @@ impl App {
         if finger && Instant::now() < self.palm_until {
             return;
         }
+        if self.tool_tip.take().is_some() {
+            self.redraw = true;
+        }
+        self.tip_until = None;
+        self.press_at = Instant::now();
+        self.long_pressed = false;
         self.finger = finger;
         self.press_start = (x, y);
         self.last_pointer = (x, y);
@@ -1968,10 +2107,10 @@ impl App {
             return;
         }
         let p = self.view.world(x, y, pressure);
-        self.push();
         self.surface.begin_stroke();
         match self.tool.as_str() {
             "pen" | "highlighter" => {
+                self.push();
                 let mut s = self.nib.clone();
                 s.tool = self.tool.clone();
                 s.points = vec![p];
@@ -1979,11 +2118,18 @@ impl App {
                 self.dirty(r);
                 self.gesture = Some(Gesture::Ink(s));
             }
+            "diagram" => {
+                let s = self
+                    .diagram_shape
+                    .stroke(p, p, self.nib.width, self.nib.color);
+                self.gesture = Some(Gesture::Diagram(p, s, self.surface.snapshot()));
+            }
             "eraser" => {
                 if let Some(page) = self.pages.get_mut(self.index) {
+                    let original = page.payload.clone();
                     erase(&mut page.payload, p, p);
+                    self.gesture = Some(Gesture::Erase(p, original));
                 }
-                self.gesture = Some(Gesture::Erase(p));
                 self.redraw = true;
             }
             "lasso" => {
@@ -2027,6 +2173,9 @@ impl App {
             self.drag_slider(x);
             return;
         }
+        if self.long_pressed {
+            return;
+        }
         if self.press.is_some() {
             if (x - self.press_start.0).hypot(y - self.press_start.1) > 18. {
                 self.press = None;
@@ -2052,7 +2201,14 @@ impl App {
                     self.dirty(r);
                 }
             }
-            Gesture::Erase(a) => {
+            Gesture::Diagram(start, stroke, background) => {
+                let next = self
+                    .diagram_shape
+                    .stroke(*start, p, self.nib.width, self.nib.color);
+                self.preview_diagram(stroke, &next, background);
+                *stroke = next;
+            }
+            Gesture::Erase(a, _) => {
                 if let Some(page) = self.pages.get_mut(self.index) {
                     if erase(&mut page.payload, *a, p) {
                         self.redraw = true;
@@ -2094,6 +2250,17 @@ impl App {
         self.gesture = Some(gesture);
     }
     pub fn up(&mut self, x: f64, y: f64) {
+        self.update_tooltip(Instant::now());
+        if self.long_pressed {
+            self.press = None;
+            self.long_pressed = false;
+            self.tip_until = Some(Instant::now() + Duration::from_millis(1000));
+            self.finger = false;
+            return;
+        }
+        if matches!(self.gesture, Some(Gesture::Diagram(..))) {
+            self.motion(x, y, 0.5);
+        }
         let moved = (x - self.press_start.0).hypot(y - self.press_start.1);
         if let Some(drag) = self.control_drag.take() {
             match drag.action {
@@ -2151,6 +2318,11 @@ impl App {
     pub fn finish(&mut self) {
         self.control_drag = None;
         self.press = None;
+        self.long_pressed = false;
+        if self.tool_tip.take().is_some() {
+            self.redraw = true;
+        }
+        self.tip_until = None;
         self.finger = false;
         let Some(gesture) = self.gesture.take() else {
             return;
@@ -2164,7 +2336,25 @@ impl App {
                     self.fail(e);
                 } /* no page rebuild on pen-up */
             }
-            Gesture::Erase(_) | Gesture::Move(..) => {
+            Gesture::Diagram(start, stroke, _) => {
+                if stroke
+                    .points
+                    .iter()
+                    .any(|p| (p[0] - start[0]).hypot(p[1] - start[1]) * self.view.zoom >= 3.)
+                {
+                    self.push();
+                    if let Some(p) = self.pages.get_mut(self.index) {
+                        p.payload.strokes.push(stroke);
+                    }
+                    if let Err(e) = self.save() {
+                        self.fail(e);
+                    }
+                } else {
+                    self.redraw = true;
+                }
+            }
+            Gesture::Erase(_, original) | Gesture::Move(_, original) => {
+                self.remember_changed(&original);
                 self.selection_bounds();
                 if let Err(e) = self.save() {
                     self.fail(e);
@@ -2215,6 +2405,9 @@ impl App {
                 self.input("Write a note", value, InputPurpose::Text(idx, p), true);
                 self.redraw = true;
             }
+        }
+        if !self.redraw && self.dialog.is_none() {
+            ui::refresh_editor_tools(self);
         }
     }
     fn selection_bounds(&mut self) {
@@ -2502,6 +2695,7 @@ impl App {
             }
         } else {
             match name {
+                "Escape" if self.page_selection.is_some() => self.act(Action::CancelPageSelection),
                 "Escape" => self.act(Action::Tools),
                 "Page_Up" => self.act(Action::Previous),
                 "Page_Down" => self.act(Action::Next),
@@ -2512,7 +2706,7 @@ impl App {
     }
     pub fn live_stroke(&self) -> Option<&Stroke> {
         match &self.gesture {
-            Some(Gesture::Ink(s)) => Some(s),
+            Some(Gesture::Ink(s)) | Some(Gesture::Diagram(_, s, _)) => Some(s),
             _ => None,
         }
     }

@@ -80,7 +80,29 @@ pub struct Surface {
     pub contrast: f64,
     pub gamma: f64,
 }
+pub struct SurfaceSnapshot {
+    pixels: Vec<u32>,
+    raw: Vec<u32>,
+}
 impl Surface {
+    pub fn snapshot(&self) -> SurfaceSnapshot {
+        SurfaceSnapshot {
+            pixels: self.pixels.clone(),
+            raw: self.raw.clone(),
+        }
+    }
+    pub fn restore(&mut self, snapshot: &SurfaceSnapshot, rect: Rect) {
+        if self.pixels.len() != snapshot.pixels.len() {
+            return;
+        }
+        for y in rect.y..rect.bottom {
+            let range = y * self.width + rect.x..y * self.width + rect.right;
+            self.pixels[range.clone()].copy_from_slice(&snapshot.pixels[range.clone()]);
+            if self.raw.len() == snapshot.raw.len() && !self.raw.is_empty() {
+                self.raw[range.clone()].copy_from_slice(&snapshot.raw[range]);
+            }
+        }
+    }
     pub fn new() -> Self {
         Self {
             pixels: vec![],

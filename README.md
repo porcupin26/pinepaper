@@ -13,13 +13,17 @@ No account is required.
   grid/list views, global filename search, type filters, sorting, rename, move
   and recoverable trash. Sort and view choices persist across restarts.
 - Quick sheets opens a fresh page in the same scratch notebook each time,
-  preserving earlier pages, even if the notebook was renamed or moved.
+  preserving earlier pages, even if the notebook was renamed or moved. Move one,
+  selected or all pages into a named notebook, keeping their order and content.
 - **Notebook** in the library toolbar opens a drawing page immediately with the pen selected.
   Tap the document title to rename it. Pen options and other context menus open
   in compact popovers over the page; tap outside to dismiss without leaving ink.
 - Six pen nibs (ballpoint, fineliner, marker, pencil, mechanical, calligraphy),
   three weights and grayscale colours; highlighter, whole-stroke eraser, lasso
   selection/movement/deletion, and editable typed notes.
+- Diagram palette: drag to create lines, arrows, double arrows, rectangles,
+  squares, ellipses, circles and diamonds. Each shape is one selectable ink
+  object, with a live preview, line weight and grayscale colour.
 - Undo/redo, automatic saving after pen-up, page insertion/deletion, six paper
   templates, bookmarks, tags and page overview.
 - PDF, text EPUB and UTF-8 text import. Originals are copied into the library.
@@ -35,7 +39,9 @@ No account is required.
   suppression of palm gestures.
 - Rounded controls with centered labels and a monochrome navigation sidebar.
 - Monochrome vector toolbar and menu icons, embedded in the app and crisp at
-  every display scale; no system icon theme is required.
+  every display scale; no system icon theme is required. Hold an icon for about
+  half a second to show its name without activating it. Unavailable commands
+  are hidden while the drawing tools keep their positions.
 - Battery percentage and charging indicator, Wi-Fi connection status and
   signal details. Tap the indicators for details; they update every 15 seconds
   and remain visible with the writing toolbar hidden. NetworkManager is read
@@ -70,6 +76,30 @@ battery status remain visible at the bottom. Quick sheets creates a new scratch
 notebook if its previous one is in the trash; it never restores deleted files
 implicitly. No library migration is needed for this update.
 
+## Writing tools and Quick sheets
+
+Hold a toolbar icon for roughly **0.55 seconds** to see its name. Release it
+without triggering the command; tap normally to use it. Add page and templates
+appear only in notebooks. Undo/Redo appear when there is a change to reverse,
+and Delete selection appears after selecting objects with the lasso.
+
+Tap the **Diagram** icon below Text. Choose a shape, then drag from one corner
+to another (or from tail to tip for an arrow). Squares and circles keep equal
+width and height. Tap Diagram again to change the shape, line weight or colour.
+Use the lasso to move or delete the whole shape, the eraser to erase it, and
+Undo/Redo to reverse changes. Shapes save automatically and work in PDF exports
+and live sharing. This first version has fixed geometry: resizing handles,
+attached connectors, automatic routing and shape recognition are not included.
+
+To organize Quick sheets, open **Page overview → Make notebook**, or choose
+**Make notebook from pages** in the page menu or the item's library menu. The
+current page starts selected; tap thumbnails or **Select all** to choose others.
+Tap **Move N pages**, enter a name, and save. PinePaper opens the new notebook.
+The pages are **moved**, keeping their ink, typed notes, templates, bookmarks,
+tags and order. The new notebook stays in the same folder. If every page moves,
+Quick sheets retains one fresh blank page. This move is a single database
+transaction; it is not part of drawing Undo/Redo. Back cancels page selection.
+
 ## Install and start
 
 PinePaper requires **Linux with a Wayland desktop**. On a PineNote running Arch,
@@ -103,7 +133,7 @@ fullscreen; the preference is remembered.
 Alternative formats:
 
 - **AppImage:** from the same artifact, run `chmod +x PinePaper-*.AppImage`,
-  then `./PinePaper-0.5.1-x86_64.AppImage` (substitute `aarch64` on ARM).
+  then `./PinePaper-0.6.0-x86_64.AppImage` (substitute `aarch64` on ARM).
   If FUSE is unavailable, prefix the launch with `APPIMAGE_EXTRACT_AND_RUN=1`.
 - **Flatpak:** download the matching `flatpak-x86_64` or `flatpak-aarch64`
   artifact, verify its checksums, then run the commands below. The separate
@@ -115,7 +145,7 @@ Alternative formats:
 
 ```sh
 flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install --user ./PinePaper-0.5.1-x86_64.flatpak
+flatpak install --user ./PinePaper-0.6.0-x86_64.flatpak
 flatpak run eu.pinepaper.PinePaper.Rust
 ```
 
@@ -365,11 +395,11 @@ under `usr/share/licenses/pinepaper/third-party/`.
 Use the ARM64 Arch package on PineNote:
 
 ```sh
-sudo pacman -U pinepaper-0.5.1-1-aarch64.pkg.tar.zst
+sudo pacman -U pinepaper-0.6.0-1-aarch64.pkg.tar.zst
 ```
 
 The source `packaging/PKGBUILD` supports x86_64 and aarch64 after a matching
-`v0.5.1` tag exists. Before that tag exists, use Cargo/nFPM directly. For local
+`v0.6.0` tag exists. Before that tag exists, use Cargo/nFPM directly. For local
 package builds, install Python 3, binutils, curl, tar and zstd, then run:
 
 ```sh
