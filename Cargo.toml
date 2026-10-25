@@ -21,7 +21,7 @@ fontdue = "0.9"
 image = { version = "0.25", default-features = false, features = ["png", "pnm"] }
 zip = { version = "2.4", default-features = false, features = ["deflate"] }
 roxmltree = "0.21"
-html2text = "0.15"
+html2text = "0.17"
 flate2 = "1"
 tempfile = "3"
 xkbcommon-dl = "0.4"
