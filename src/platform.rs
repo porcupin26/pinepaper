@@ -15,6 +15,9 @@ const BUS: &str = "org.pinenote.PineNoteCtl";
 const OBJECT: &str = "/org/pinenote/PineNoteCtl";
 const INTERFACE: &str = "org.pinenote.Ebc1";
 
+#[cfg(test)]
+mod dbus_tests;
+
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct Status {
     pub battery: Option<u8>,
@@ -70,57 +73,62 @@ impl Status {
         format!("{wifi}   {b}")
     }
 }
+// Keep every D-Bus exchange inside its worker's runtime scope. Nothing here
+// runs on the Wayland/input thread or carries a connection across worker threads.
 fn wifi_status() -> Result<(String, String, Option<u8>)> {
-    use zbus::{
-        blocking::{Connection, Proxy},
-        zvariant::OwnedObjectPath,
-    };
-    let connection = Connection::system()?;
-    let nm = Proxy::new(
-        &connection,
-        "org.freedesktop.NetworkManager",
-        "/org/freedesktop/NetworkManager",
-        "org.freedesktop.NetworkManager",
-    )?;
-    if !nm.get_property::<bool>("WirelessEnabled")? {
-        return Ok(("Off".into(), String::new(), None));
-    }
-    let devices: Vec<OwnedObjectPath> = nm.call("GetDevices", &())?;
-    for path in devices {
-        let dev = Proxy::new(
+    use zbus::{Connection, OwnedObjectPath, Proxy};
+    zbus::block_on(async {
+        let connection = Connection::system().await?;
+        let nm = Proxy::new(
             &connection,
             "org.freedesktop.NetworkManager",
-            path.clone(),
-            "org.freedesktop.NetworkManager.Device",
-        )?;
-        if dev.get_property::<u32>("DeviceType")? != 2 {
-            continue;
+            "/org/freedesktop/NetworkManager",
+            "org.freedesktop.NetworkManager",
+        )
+        .await?;
+        if !nm.get_property::<bool>("WirelessEnabled").await? {
+            return Ok(("Off".into(), String::new(), None));
         }
-        let wifi = Proxy::new(
-            &connection,
-            "org.freedesktop.NetworkManager",
-            path,
-            "org.freedesktop.NetworkManager.Device.Wireless",
-        )?;
-        let ap: OwnedObjectPath = wifi.get_property("ActiveAccessPoint")?;
-        if ap.as_str() == "/" {
-            continue;
+        let devices: Vec<OwnedObjectPath> = nm.call("GetDevices", &()).await?;
+        for path in devices {
+            let dev = Proxy::new(
+                &connection,
+                "org.freedesktop.NetworkManager",
+                path.clone(),
+                "org.freedesktop.NetworkManager.Device",
+            )
+            .await?;
+            if dev.get_property::<u32>("DeviceType").await? != 2 {
+                continue;
+            }
+            let wifi = Proxy::new(
+                &connection,
+                "org.freedesktop.NetworkManager",
+                path,
+                "org.freedesktop.NetworkManager.Device.Wireless",
+            )
+            .await?;
+            let ap: OwnedObjectPath = wifi.get_property("ActiveAccessPoint").await?;
+            if ap.as_str() == "/" {
+                continue;
+            }
+            let ap = Proxy::new(
+                &connection,
+                "org.freedesktop.NetworkManager",
+                ap,
+                "org.freedesktop.NetworkManager.AccessPoint",
+            )
+            .await?;
+            let ssid: Vec<u8> = ap.get_property("Ssid").await?;
+            let signal: u8 = ap.get_property("Strength").await?;
+            return Ok((
+                "Connected".into(),
+                String::from_utf8_lossy(&ssid).into_owned(),
+                Some(signal),
+            ));
         }
-        let ap = Proxy::new(
-            &connection,
-            "org.freedesktop.NetworkManager",
-            ap,
-            "org.freedesktop.NetworkManager.AccessPoint",
-        )?;
-        let ssid: Vec<u8> = ap.get_property("Ssid")?;
-        let signal: u8 = ap.get_property("Strength")?;
-        return Ok((
-            "Connected".into(),
-            String::from_utf8_lossy(&ssid).into_owned(),
-            Some(signal),
-        ));
-    }
-    Ok(("Disconnected".into(), String::new(), None))
+        Ok(("Disconnected".into(), String::new(), None))
+    })
 }
 pub fn status_worker() -> mpsc::Receiver<Status> {
     let (tx, rx) = mpsc::channel();
@@ -443,22 +451,27 @@ fn write_lights(h: &Hardware) -> Result<()> {
     Ok(())
 }
 fn property(key: &str) -> Result<u32> {
-    let c = zbus::blocking::Connection::session()?;
-    let p = zbus::blocking::Proxy::new(&c, BUS, OBJECT, INTERFACE)?;
-    if key == "RedrawDelay" {
-        Ok(p.get_property::<u16>(key)? as u32)
-    } else {
-        Ok(p.get_property::<u8>(key)? as u32)
-    }
+    zbus::block_on(async {
+        let c = zbus::Connection::session().await?;
+        let p = zbus::Proxy::new(&c, BUS, OBJECT, INTERFACE).await?;
+        if key == "RedrawDelay" {
+            Ok(p.get_property::<u16>(key).await? as u32)
+        } else {
+            Ok(p.get_property::<u8>(key).await? as u32)
+        }
+    })
 }
 fn set_property(key: &str, value: u32) -> Result<()> {
-    let c = zbus::blocking::Connection::session()?;
-    let p = zbus::blocking::Proxy::new(&c, BUS, OBJECT, INTERFACE)?;
-    if key == "RedrawDelay" {
-        p.set_property(key, value as u16)?;
-    } else {
-        p.set_property(key, value as u8)?;
-    }
+    zbus::block_on(async {
+        let c = zbus::Connection::session().await?;
+        let p = zbus::Proxy::new(&c, BUS, OBJECT, INTERFACE).await?;
+        if key == "RedrawDelay" {
+            p.set_property(key, value as u16).await?;
+        } else {
+            p.set_property(key, value as u8).await?;
+        }
+        Ok::<_, anyhow::Error>(())
+    })?;
     if key == "RedrawDelay" {
         refresh()?;
     }
@@ -472,9 +485,11 @@ fn set_property(key: &str, value: u32) -> Result<()> {
 }
 pub fn refresh() -> Result<()> {
     let old = property("DriverMode")?;
-    let c = zbus::blocking::Connection::session()?;
-    let p = zbus::blocking::Proxy::new(&c, BUS, OBJECT, INTERFACE)?;
-    p.call::<_, _, ()>("GlobalRefresh", &())?;
+    zbus::block_on(async {
+        let c = zbus::Connection::session().await?;
+        let p = zbus::Proxy::new(&c, BUS, OBJECT, INTERFACE).await?;
+        p.call::<_, _, ()>("GlobalRefresh", &()).await
+    })?;
     thread::sleep(Duration::from_millis(150));
     for _ in 0..50 {
         if property("DriverMode")? == old {
