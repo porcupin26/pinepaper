@@ -190,7 +190,7 @@ fullscreen; the preference is remembered.
 Alternative formats:
 
 - **AppImage:** from the same artifact, run `chmod +x PinePaper-*.AppImage`,
-  then `./PinePaper-0.6.5-x86_64.AppImage` (substitute `aarch64` on ARM).
+  then `./PinePaper-0.6.6-x86_64.AppImage` (substitute `aarch64` on ARM).
   If FUSE is unavailable, prefix the launch with `APPIMAGE_EXTRACT_AND_RUN=1`.
 - **Flatpak:** download the matching `flatpak-x86_64` or `flatpak-aarch64`
   artifact, verify its checksums, then run the commands below. The separate
@@ -202,7 +202,7 @@ Alternative formats:
 
 ```sh
 flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install --user ./PinePaper-0.6.5-x86_64.flatpak
+flatpak install --user ./PinePaper-0.6.6-x86_64.flatpak
 flatpak run eu.pinepaper.PinePaper.Rust
 ```
 
@@ -464,11 +464,11 @@ under `usr/share/licenses/pinepaper/third-party/`.
 Use the ARM64 Arch package on PineNote:
 
 ```sh
-sudo pacman -U pinepaper-0.6.5-1-aarch64.pkg.tar.zst
+sudo pacman -U pinepaper-0.6.6-1-aarch64.pkg.tar.zst
 ```
 
 The source `packaging/PKGBUILD` supports x86_64 and aarch64 after a matching
-`v0.6.5` tag exists. Before that tag exists, use Cargo/nFPM directly. For local
+`v0.6.6` tag exists. Before that tag exists, use Cargo/nFPM directly. For local
 package builds, install Python 3, binutils, curl, tar and zstd, then run:
 
 ```sh

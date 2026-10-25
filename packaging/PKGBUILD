@@ -1,6 +1,6 @@
 # Build natively on x86_64 Arch or aarch64 Arch Linux ARM / PineNote.
 pkgname=pinepaper
-pkgver=0.6.5
+pkgver=0.6.6
 pkgrel=1
 pkgdesc='Native notebook and PDF/EPUB reader for PineNote and Wayland'
 arch=('x86_64' 'aarch64')
@@ -9,6 +9,7 @@ license=('MIT')
 depends=('glibc' 'gcc-libs' 'libxkbcommon' 'poppler' 'wl-clipboard')
 optdepends=('networkmanager: Wi-Fi status' 'sway: PineNote per-window refresh hints')
 makedepends=('rust' 'git')
+checkdepends=('dbus')
 source=("git+https://github.com/porcupin26/pinepaper.git#tag=v$pkgver")
 sha256sums=('SKIP') # Git tag; Cargo.lock pins and checksums dependencies.
 build() {
