@@ -1,13 +1,42 @@
 //! Optional manual PineNote check. Run as the desktop user with the app open.
 //! --exercise temporarily changes the lights/driver settings and restores them.
+//! --benchmark times repeated read-only polls and reports worker resources.
 use anyhow::{ensure, Result};
 use pinepaper::platform::{self, Hardware, Status};
+use std::{fs, hint::black_box, time::Instant};
 
 fn main() -> Result<()> {
     let status = Status::read();
     println!("Status: {}", status.brief());
     let before = Hardware::read();
     println!("Hardware: {before:?}");
+    if std::env::args().any(|a| a == "--benchmark") {
+        let resources = || {
+            let count = |path| fs::read_dir(path).map(|files| files.count()).unwrap_or(0);
+            (count("/proc/self/task"), count("/proc/self/fd"))
+        };
+        let initial = resources();
+        let mut status_ms = Vec::new();
+        let mut hardware_ms = Vec::new();
+        for _ in 0..40 {
+            let start = Instant::now();
+            black_box(Status::read());
+            status_ms.push(start.elapsed().as_secs_f64() * 1000.);
+            let start = Instant::now();
+            black_box(Hardware::read());
+            hardware_ms.push(start.elapsed().as_secs_f64() * 1000.);
+        }
+        for (name, mut samples) in [("status", status_ms), ("hardware", hardware_ms)] {
+            samples.sort_by(f64::total_cmp);
+            println!(
+                "{name}: median={:.2}ms p95={:.2}ms",
+                samples[20], samples[38]
+            );
+        }
+        // Allow asynchronous connection teardown to finish before counting.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        println!("Threads/fds: before={initial:?} after={:?}", resources());
+    }
     if std::env::args().any(|a| a == "--exercise") {
         ensure!(
             before.cool.is_some() && before.warm.is_some() && before.driver.is_some(),

@@ -491,6 +491,10 @@ not silently modify hardware.
 
 ## Verification
 
+The platform protocol test requires `dbus-daemon` (Debian/Ubuntu package
+`dbus-daemon`; Arch package `dbus`). It starts an isolated bus and subprocess,
+so mock Wi-Fi and display services never reach the real system/session bus.
+
 ```sh
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
@@ -517,6 +521,18 @@ keyboard entry, rotation with an open draft, fullscreen and clean shutdown.
 `examples/hardware_probe.rs` is a manual PineNote diagnostic. Without arguments
 it reads status. Its explicit `--exercise` option temporarily changes the
 lights and display settings, verifies readback, then restores their values.
+`--benchmark` performs 40 read-only status/display polls, reports median and
+95th percentile latency, and counts threads/file descriptors before and after.
+Run it as the desktop user in the same session as PinePaper.
+
+The zbus 6 integration keeps D-Bus work on the existing background workers;
+pen input, rendering, front-light sysfs writes, polling intervals and hardware
+settling/rollback behavior are unchanged. Each D-Bus exchange owns its
+connection within one `block_on` scope; follow-up refresh/readback operations
+run after that scope exits, avoiding nested runtimes. Protocol tests cover
+Wi-Fi states, byte-array SSIDs, 8/16-bit display properties, delayed refresh
+without property notifications, rollback after a rejected setting, and service
+disappearance/reconnection.
 
 EPUB layout is text-oriented: publisher CSS, embedded illustrations and DRM
 are unsupported, as in the Python app. Exported PDF annotations are flattened.

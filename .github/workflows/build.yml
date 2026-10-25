@@ -24,7 +24,7 @@ jobs:
           toolchain: '1.96.0'
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
-      - run: sudo apt-get update && sudo apt-get install -y poppler-utils libxkbcommon0 desktop-file-utils sway grim wtype
+      - run: sudo apt-get update && sudo apt-get install -y dbus-daemon poppler-utils libxkbcommon0 desktop-file-utils sway grim wtype
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
@@ -70,7 +70,7 @@ jobs:
           toolchain: '1.96.0'
       - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
       - name: Build dependencies
-        run: sudo apt-get update && sudo apt-get install -y build-essential poppler-utils poppler-data libxkbcommon0 wl-clipboard squashfs-tools zstd rpm cpio desktop-file-utils
+        run: sudo apt-get update && sudo apt-get install -y build-essential dbus-daemon poppler-utils poppler-data libxkbcommon0 wl-clipboard squashfs-tools zstd rpm cpio desktop-file-utils
       - run: cargo test --locked
       - run: cargo build --release --locked
       - name: Pinned packaging tools
