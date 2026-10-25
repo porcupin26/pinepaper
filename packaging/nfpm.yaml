@@ -29,12 +29,21 @@ contents:
     dst: /usr/share/licenses/pinepaper/FONT-LICENSE.txt
   - src: README.md
     dst: /usr/share/doc/pinepaper/README.md
+  - src: docs/remarkable-reference.md
+    dst: /usr/share/doc/pinepaper/docs/remarkable-reference.md
+  - src: docs/images/library-landscape.png
+    dst: /usr/share/doc/pinepaper/docs/images/library-landscape.png
+  - src: docs/images/library-portrait.png
+    dst: /usr/share/doc/pinepaper/docs/images/library-portrait.png
+  - src: docs/images/library-menu-portrait.png
+    dst: /usr/share/doc/pinepaper/docs/images/library-menu-portrait.png
 overrides:
   deb:
     depends: [libc6 (>= ${PACKAGE_LIBC_MIN}), libgcc-s1, libxkbcommon0, poppler-utils, wl-clipboard]
     recommends: [network-manager]
   rpm:
-    depends: [glibc >= ${PACKAGE_LIBC_MIN}, libgcc, libxkbcommon, poppler-utils, wl-clipboard]
+    # Capabilities and paths work across Fedora and openSUSE package names.
+    depends: [glibc >= ${PACKAGE_LIBC_MIN}, 'libgcc_s.so.1()(64bit)', 'libxkbcommon.so.0()(64bit)', /usr/bin/pdfinfo, /usr/bin/pdftoppm, /usr/bin/wl-copy, /usr/bin/wl-paste]
     recommends: [NetworkManager]
   archlinux:
     depends: [glibc, gcc-libs, libxkbcommon, poppler, wl-clipboard]

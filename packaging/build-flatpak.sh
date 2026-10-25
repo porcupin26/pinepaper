@@ -7,8 +7,9 @@ arch=$(uname -m)
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 mkdir -p "$stage/source" dist
-# Explicit allowlist: never package local notebooks, keys, screenshots or target/.
-cp -a Cargo.toml Cargo.lock src assets packaging LICENSE README.md "$stage/source/"
+# Explicit allowlist: docs contains synthetic UI samples, never private captures.
+# Local notebooks, keys, artifacts/ and target/ stay outside the source archive.
+cp -a Cargo.toml Cargo.lock src assets docs packaging LICENSE README.md "$stage/source/"
 mkdir -p "$stage/source/.cargo"
 cargo vendor --locked "$stage/source/vendor" | sed 's|^directory = .*|directory = "vendor"|' > "$stage/source/.cargo/config.toml"
 cp packaging/eu.pinepaper.PinePaper.Rust.json "$stage/manifest.json"

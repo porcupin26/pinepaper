@@ -311,8 +311,16 @@ fn receive_source(root: &Path, source: Source) -> Result<String> {
     Ok(name)
 }
 fn publish(tx: &mpsc::SyncSender<Event>, event: Event) -> Result<()> {
-    tx.try_send(event)
-        .map_err(|_| anyhow::anyhow!("Client is busy; reconnecting to synchronize"))
+    match tx.try_send(event) {
+        Ok(()) => Ok(()),
+        // Link::drop closes the UI receiver and asks the worker to drain its
+        // outgoing edits. An incoming event racing with that drop must not
+        // abort run() before the final queued stroke has been sent.
+        Err(mpsc::TrySendError::Disconnected(_)) => Ok(()),
+        Err(mpsc::TrySendError::Full(_)) => {
+            bail!("Client is busy; reconnecting to synchronize")
+        }
+    }
 }
 fn worker(
     url: url::Url,
@@ -503,6 +511,14 @@ fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn closing_ui_receiver_allows_outgoing_drain_but_congestion_reconnects() {
+        let (tx, rx) = mpsc::sync_channel(1);
+        publish(&tx, Event::Joined("first".into())).unwrap();
+        assert!(publish(&tx, Event::Joined("second".into())).is_err());
+        drop(rx);
+        publish(&tx, Event::Joined("arrived_during_close".into())).unwrap();
+    }
     #[test]
     fn chunk_transfer_roundtrip_and_sender_isolation() {
         // Poorly compressible, deterministic data forces several fragments.

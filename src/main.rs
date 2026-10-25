@@ -100,7 +100,44 @@ fn smoke_test(output: PathBuf) -> Result<()> {
         vec![page.clone(), Payload::blank("Dots"), Payload::blank("Grid")],
         None,
     )?;
-    a.store.create("Work", "folder", None, vec![], None)?;
+    for name in [
+        "Projects",
+        "Development",
+        "Financials",
+        "To Read",
+        "Planning",
+        "Market Analysis",
+    ] {
+        a.store.create(name, "folder", None, vec![], None)?;
+    }
+    let mut sketch = Payload::blank("Dots");
+    sketch.texts.push(Text {
+        text: "Project handover\n\nGoals → sketches → next steps".into(),
+        x: 55.,
+        y: 70.,
+        size: 26.,
+        font: "Sans".into(),
+        color: 0.08,
+        extra: Default::default(),
+    });
+    for (x, y) in [(85., 300.), (400., 300.), (245., 510.)] {
+        sketch.strokes.push(Stroke {
+            points: vec![
+                [x, y, 0.5],
+                [x + 190., y, 0.5],
+                [x + 190., y + 110., 0.5],
+                [x, y + 110., 0.5],
+                [x, y, 0.5],
+            ],
+            ..Stroke::default()
+        });
+    }
+    sketch.strokes.push(Stroke {
+        points: vec![[275., 355., 0.5], [400., 355., 0.5], [340., 510., 0.5]],
+        ..Stroke::default()
+    });
+    a.store
+        .create("Project handover", "notebook", None, vec![sketch], None)?;
     a.store.create(
         "Reading journal",
         "notebook",
@@ -110,12 +147,75 @@ fn smoke_test(output: PathBuf) -> Result<()> {
     )?;
     a.store.create("A room of one's own","book",None,pinepaper::document::paginate("A notebook makes room for an unfinished idea. Write it down, return to it, and let it grow.\n\nThe page stays quiet while your thoughts move.","A room of one's own"),None)?;
     a.reload_library()?;
+    let mut brush_demo = Payload::blank("Blank");
+    for (i, name) in pinepaper::model::BRUSHES.iter().enumerate() {
+        let y = 170. + i as f64 * 120.;
+        brush_demo.texts.push(Text {
+            text: format!("{name} brush"),
+            x: 50.,
+            y: y - 65.,
+            size: 22.,
+            font: "Sans".into(),
+            color: 0.07,
+            extra: Default::default(),
+        });
+        brush_demo.strokes.push(Stroke {
+            tool: "brush".into(),
+            pen: (*name).into(),
+            width: 28.,
+            color: 0.07,
+            points: (0..250)
+                .map(|n| {
+                    [
+                        80. + n as f64 * 2.4,
+                        y + (n as f64 / 30.).sin() * 18.,
+                        0.1 + 0.9 * n as f64 / 249.,
+                    ]
+                })
+                .collect(),
+            extra: Default::default(),
+        });
+    }
+    for (i, (width, label)) in pinepaper::model::HIGHLIGHTER_SIZES.iter().enumerate() {
+        let y = 710. + i as f64 * 70.;
+        brush_demo.strokes.push(Stroke {
+            width: *width,
+            points: vec![[80., y, 0.5], [680., y, 0.5]],
+            ..Stroke::highlighter()
+        });
+        brush_demo.texts.push(Text {
+            text: format!("{label} highlighter"),
+            x: 100.,
+            y: y - 14.,
+            size: 22.,
+            font: "Sans".into(),
+            color: 0.07,
+            extra: Default::default(),
+        });
+    }
+    let brush_id = a.store.create(
+        "Brushes and highlighters",
+        "notebook",
+        None,
+        vec![brush_demo],
+        None,
+    )?;
     for (w, h, label) in [(936, 702, "landscape"), (702, 936, "portrait")] {
         a.screen = Screen::Library;
         a.resize(w, h, 2);
         a.render();
         a.surface
             .save_png(&output.join(format!("library-{label}.png")))?;
+        a.act(Action::LibraryMenu);
+        a.render();
+        a.surface
+            .save_png(&output.join(format!("library-menu-{label}.png")))?;
+        a.act(Action::Close);
+        a.act(Action::LibraryView);
+        a.render();
+        a.surface
+            .save_png(&output.join(format!("library-list-{label}.png")))?;
+        a.act(Action::LibraryView);
         a.act(Action::Create);
         a.render();
         a.surface
@@ -125,7 +225,140 @@ fn smoke_test(output: PathBuf) -> Result<()> {
         a.render();
         a.surface
             .save_png(&output.join(format!("notebook-{label}.png")))?;
+        a.open(&brush_id)?;
+        a.fit = true;
+        a.render();
+        a.surface
+            .save_png(&output.join(format!("brush-samples-{label}.png")))?;
+        for (tool, name) in [("highlighter", "highlighter"), ("brush", "brush")] {
+            a.act(Action::Tool(tool.into()));
+            a.act(Action::PenPanel);
+            a.render();
+            a.surface
+                .save_png(&output.join(format!("{name}-menu-{label}.png")))?;
+            a.act(Action::Close);
+        }
+        a.fit = false;
+        a.open(&id)?;
+        a.render();
+        a.act(Action::Tool("diagram".into()));
+        a.render();
+        a.surface
+            .save_png(&output.join(format!("diagram-menu-{label}.png")))?;
+        a.act(Action::Shape(pinepaper::diagram::Shape::Arrow));
+        a.render();
+        let start = a.view.screen([180., 420., 0.5]);
+        let end = a.view.screen([500., 490., 0.5]);
+        a.down(start[0], start[1], 0.5, false);
+        a.motion(end[0], end[1], 0.5);
+        a.up(end[0], end[1]);
+        a.render();
+        a.surface
+            .save_png(&output.join(format!("diagram-{label}.png")))?;
+        a.act(Action::Tool("select".into()));
+        a.render();
+        let center = a.view.screen([340., 455., 0.5]);
+        a.down(center[0], center[1], 0.5, false);
+        a.up(center[0], center[1]);
+        a.render();
+        a.surface
+            .save_png(&output.join(format!("selected-arrow-{label}.png")))?;
+        let end = a.view.screen([500., 490., 0.5]);
+        let next = a.view.screen([560., 410., 0.5]);
+        a.down(end[0], end[1], 0.5, false);
+        a.render();
+        a.motion(next[0], next[1], 0.5);
+        a.up(next[0], next[1]);
+        a.render();
+        a.surface
+            .save_png(&output.join(format!("edited-arrow-{label}.png")))?;
+        a.act(Action::Undo); // Endpoint change.
+        a.act(Action::Undo); // Original diagram.
+        a.act(Action::Shape(pinepaper::diagram::Shape::Rectangle));
+        a.render();
+        let start = a.view.screen([180., 340., 0.5]);
+        let end = a.view.screen([460., 440., 0.5]);
+        a.down(start[0], start[1], 0.5, false);
+        a.up(end[0], end[1]);
+        a.act(Action::Tool("select".into()));
+        a.render();
+        let center = a.view.screen([320., 390., 0.5]);
+        a.down(center[0], center[1], 0.5, false);
+        a.up(center[0], center[1]);
+        a.render();
+        a.surface
+            .save_png(&output.join(format!("selected-shape-{label}.png")))?;
+        let handle = a
+            .selected_resize_handles()
+            .into_iter()
+            .find(|(kind, _)| *kind == pinepaper::diagram::ResizeHandle::SouthEast)
+            .unwrap()
+            .1;
+        let start = a.view.screen(handle);
+        let end = a.view.screen([handle[0] + 70., handle[1] + 40., 0.5]);
+        a.down(start[0], start[1], 0.5, false);
+        a.render();
+        a.queue_motion(end[0], end[1], 0.5);
+        a.render();
+        a.up(end[0], end[1]);
+        a.render();
+        a.surface
+            .save_png(&output.join(format!("resized-shape-{label}.png")))?;
+        a.act(Action::Undo);
+        a.act(Action::Undo);
+        // Snap preview and release in both orientations, using the normal input path.
+        for (shape, from, to) in [
+            (
+                pinepaper::diagram::Shape::Rectangle,
+                [500., 380., 0.5],
+                [650., 500., 0.5],
+            ),
+            (
+                pinepaper::diagram::Shape::Arrow,
+                [180., 440., 0.5],
+                [400., 440., 0.5],
+            ),
+        ] {
+            a.act(Action::Shape(shape));
+            a.render();
+            let p = a.view.screen(from);
+            let q = a.view.screen(to);
+            a.down(p[0], p[1], 0.5, false);
+            a.up(q[0], q[1]);
+        }
+        a.act(Action::Tool("select".into()));
+        a.act(Action::Magnet);
+        a.render();
+        let p = a.view.screen([290., 440., 0.5]);
+        a.down(p[0], p[1], 0.5, false);
+        a.up(p[0], p[1]);
+        a.render();
+        let p = a.view.screen([400., 440., 0.5]);
+        let q = a.view.screen([495., 442., 0.5]);
+        a.down(p[0], p[1], 0.5, false);
+        a.render();
+        a.motion(q[0], q[1], 0.5);
+        a.render();
+        anyhow::ensure!(a.snap_target.is_some(), "Magnet preview did not snap");
+        a.surface
+            .save_png(&output.join(format!("magnet-active-{label}.png")))?;
+        a.up(q[0], q[1]);
+        a.render();
+        a.surface
+            .save_png(&output.join(format!("magnet-released-{label}.png")))?;
+        a.act(Action::Undo);
+        a.act(Action::Undo);
+        a.act(Action::Undo);
+        a.act(Action::Magnet);
+        a.store.set("quick_sheets", &Some(&id))?;
+        a.act(Action::MakeNotebook);
+        a.act(Action::SelectPages(true));
+        a.render();
+        a.surface
+            .save_png(&output.join(format!("move-pages-{label}.png")))?;
+        a.act(Action::CancelPageSelection);
         a.act(Action::Tool("pen".into()));
+        a.act(Action::PenPanel);
         a.render();
         a.surface
             .save_png(&output.join(format!("pen-menu-{label}.png")))?;

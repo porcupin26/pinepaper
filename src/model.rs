@@ -24,6 +24,13 @@ pub const PENS: [&str; 6] = [
     "Mechanical",
     "Calligraphy",
 ];
+pub const BRUSHES: [&str; 4] = ["Round", "Flat", "Soft", "Dry"];
+pub const BRUSH_SIZES: [(f64, &str); 4] =
+    [(3., "Fine"), (8., "Medium"), (16., "Broad"), (28., "Wide")];
+// Keep the historical highlighter width multiplier for saved document compatibility.
+pub const HIGHLIGHTER_SIZES: [(f64, &str); 4] =
+    [(2., "Fine"), (4., "Medium"), (6., "Broad"), (9., "Wide")];
+pub const PEN_SIZES: [(f64, &str); 3] = [(1.4, "Fine"), (2.4, "Medium"), (4., "Bold")];
 pub type Point = [f64; 3];
 fn pen() -> String {
     "Fineliner".into()
@@ -70,6 +77,41 @@ impl Default for Stroke {
             color: color(),
             points: vec![],
             extra: BTreeMap::new(),
+        }
+    }
+}
+impl Stroke {
+    pub fn brush() -> Self {
+        Self {
+            tool: "brush".into(),
+            pen: "Round".into(),
+            width: 8.,
+            ..Self::default()
+        }
+    }
+    pub fn highlighter() -> Self {
+        Self {
+            tool: "highlighter".into(),
+            width: 4.,
+            ..Self::default()
+        }
+    }
+    /// Conservative geometric radius for selection and erasing, in page units.
+    pub fn max_radius(&self) -> f64 {
+        if self.tool == "highlighter" {
+            (self.width * 7.).max(14.) / 2.
+        } else if self.tool == "brush" {
+            self.width * 1.75 / 2.
+        } else {
+            self.width
+                * match self.pen.as_str() {
+                    "Mechanical" => 0.35,
+                    "Marker" => 1.25,
+                    "Ballpoint" => 0.75,
+                    "Pencil" => 0.7,
+                    "Calligraphy" => 1.875,
+                    _ => 0.5,
+                }
         }
     }
 }
@@ -257,12 +299,17 @@ impl Store {
         trash: bool,
     ) -> Result<Vec<Document>> {
         let order = [
-            "MAX(opened,updated) DESC",
+            "opened DESC,updated DESC",
             "title COLLATE NOCASE",
             "created DESC",
-        ][sort.min(2)];
-        let mut stmt = self.db.prepare(&format!("SELECT * FROM documents WHERE trashed=? AND (? OR parent IS ?) AND (?='' OR kind=?) ORDER BY {order}"))?;
-        let rows = stmt.query_map(params![trash, trash, parent, kind, kind], document)?;
+            "updated DESC",
+            "kind,title COLLATE NOCASE",
+        ][sort.min(4)];
+        let mut stmt = self.db.prepare(&format!("SELECT * FROM documents WHERE trashed=? AND (? OR ?!='' OR ?!='' OR parent IS ?) AND (?='' OR kind=?) ORDER BY {order}"))?;
+        let rows = stmt.query_map(
+            params![trash, trash, kind, query, parent, kind, kind],
+            document,
+        )?;
         Ok(rows
             .collect::<rusqlite::Result<Vec<_>>>()?
             .into_iter()
@@ -300,6 +347,65 @@ impl Store {
                 params![identifier(), id, i as i64, serde_json::to_string(p)?],
             )?;
         }
+        tx.commit()?;
+        Ok(id)
+    }
+    pub fn move_pages_to_notebook(
+        &mut self,
+        source: &str,
+        selected: &[String],
+        title: &str,
+    ) -> Result<String> {
+        let doc = self.document(source)?;
+        let title: String = title.trim().chars().take(240).collect();
+        let pages = self.pages(source)?;
+        let chosen: std::collections::BTreeSet<_> = selected.iter().collect();
+        anyhow::ensure!(
+            doc.kind == "notebook" && !doc.trashed,
+            "Open an active notebook first"
+        );
+        anyhow::ensure!(!title.is_empty(), "Please enter a name");
+        anyhow::ensure!(
+            !chosen.is_empty()
+                && chosen.len() == selected.len()
+                && chosen.iter().all(|id| pages.iter().any(|p| &p.id == *id)),
+            "Some selected pages are no longer available"
+        );
+        let id = identifier();
+        let tx = self.db.transaction()?;
+        tx.execute("INSERT INTO documents(id,title,kind,parent,created,updated) VALUES(?,?,'notebook',?,?,?)",
+            params![id,title,doc.parent,now(),now()])?;
+        let (mut moved, mut remaining) = (0, 0);
+        for page in &pages {
+            let (target, position) = if chosen.contains(&page.id) {
+                let position = moved;
+                moved += 1;
+                (&id, position)
+            } else {
+                let position = remaining;
+                remaining += 1;
+                (&doc.id, position)
+            };
+            tx.execute(
+                "UPDATE pages SET document=?,position=? WHERE id=?",
+                params![target, position as i64, page.id],
+            )?;
+        }
+        if remaining == 0 {
+            tx.execute(
+                "INSERT INTO pages(id,document,position,payload) VALUES(?,?,0,?)",
+                params![
+                    identifier(),
+                    source,
+                    serde_json::to_string(&Payload::blank("Blank"))?
+                ],
+            )?;
+            remaining = 1;
+        }
+        tx.execute(
+            "UPDATE documents SET current_page=?,updated=? WHERE id=?",
+            params![doc.current_page.min(remaining - 1) as i64, now(), source],
+        )?;
         tx.commit()?;
         Ok(id)
     }
@@ -573,6 +679,12 @@ pub struct History {
     redo: Vec<Payload>,
 }
 impl History {
+    pub fn can_undo(&self, current: &Payload) -> bool {
+        self.undo.iter().any(|p| p != current)
+    }
+    pub fn can_redo(&self, current: &Payload) -> bool {
+        self.redo.iter().any(|p| p != current)
+    }
     pub fn push(&mut self, p: &Payload) {
         self.undo.push(p.clone());
         if self.undo.len() > 40 {
@@ -581,13 +693,19 @@ impl History {
         self.redo.clear();
     }
     pub fn undo(&mut self, p: &mut Payload) {
-        if let Some(prev) = self.undo.pop() {
-            self.redo.push(std::mem::replace(p, prev));
+        while let Some(prev) = self.undo.pop() {
+            if prev != *p {
+                self.redo.push(std::mem::replace(p, prev));
+                break;
+            }
         }
     }
     pub fn redo(&mut self, p: &mut Payload) {
-        if let Some(next) = self.redo.pop() {
-            self.undo.push(std::mem::replace(p, next));
+        while let Some(next) = self.redo.pop() {
+            if next != *p {
+                self.undo.push(std::mem::replace(p, next));
+                break;
+            }
         }
     }
 }
@@ -620,7 +738,7 @@ pub fn inside(p: Point, polygon: &[Point]) -> bool {
 pub fn erase(p: &mut Payload, a: Point, b: Point) -> bool {
     let before = p.strokes.len();
     p.strokes.retain(|s| {
-        let r = 10. + s.width / 2.;
+        let r = 10. + s.max_radius();
         if s.points.iter().any(|&p| distance(p, a, b) <= r) {
             return false;
         }

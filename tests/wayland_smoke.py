@@ -70,11 +70,17 @@ def main():
                     app = subprocess.Popen([str(binary), '--data-dir', str(root / 'library')],
                                            env=env, stdout=app_log, stderr=app_log)
                     time.sleep(1)
-                    click(870, 65)  # Create, then Notebook in the anchored popup.
-                    click(650, 166)
+                    click(450, 36)  # Notebook opens drawing directly from the library toolbar.
                     db = sqlite3.connect(root / 'library/library.sqlite3')
                     assert db.execute('SELECT title FROM documents').fetchone()[0] == 'Notebook 1'
                     click(160, 65)  # Naming is optional, through the document title.
+                    point('move 52 539 936 702')  # Q on the built-in keyboard.
+                    point('down')
+                    time.sleep(.08)
+                    subprocess.run(['grim', str(output / 'key-pressed.png')], env=env, check=True)
+                    point('up')
+                    time.sleep(.65)
+                    subprocess.run(['grim', str(output / 'key-released.png')], env=env, check=True)
                     key('-M', 'ctrl', 'a', '-m', 'ctrl')
                     key('Wayland notebook')
                     key('-k', 'Return')
@@ -97,6 +103,104 @@ def main():
                     subprocess.run(['grim', str(output / 'pen-popup.png')], env=env, check=True)
                     click(650, 600)  # Dismiss outside; this must never ink the page.
                     assert len(json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])['strokes']) == 1
+                    point('move 34 387 936 702')
+                    point('down')
+                    time.sleep(.7)
+                    subprocess.run(['grim', str(output / 'tool-label.png')], env=env, check=True)
+                    point('up')
+                    time.sleep(1.1)
+                    click(34, 387)  # Diagram palette.
+                    subprocess.run(['grim', str(output / 'diagram-menu.png')], env=env, check=True)
+                    click(340, 389)  # Arrow in the landscape popover's first row.
+                    point('move 250 400 936 702')
+                    point('down')
+                    for i in range(30):
+                        # A curved pen path still creates a straight tail-to-tip arrow.
+                        point(f'move {250+i*5} {round(400+i*3+35*math.sin(i*math.pi/29))} 936 702')
+                    point('move 395 487 936 702')
+                    point('up')
+                    time.sleep(.5)
+                    payload=json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])
+                    assert len(payload['strokes']) == 2, payload
+                    assert payload['strokes'][-1]['diagram_shape'] == 'Arrow', payload
+                    ends = payload['strokes'][-1]['points'][:2]
+                    # Convert from document coordinates to this fixed landscape viewport.
+                    zoom = (936-68-24)/760
+                    assert abs(80 + ends[1][0]*zoom - 395) < .1, ends
+                    assert abs(98 + ends[1][1]*zoom - 487) < .1, ends
+                    subprocess.run(['grim', str(output / 'diagram.png')], env=env, check=True)
+                    click(34,431)  # Select, below Diagram.
+                    click(322,443)  # Select the arrow shaft.
+                    subprocess.run(['grim',str(output / 'selected-arrow.png')],env=env,check=True)
+                    original=payload['strokes'][-1]['points'][:2]
+                    point('move 395 487 936 702')
+                    point('down')
+                    for i in range(1,22):
+                        point(f'move {395+i*5} {487+i*3} 936 702')
+                    point('up')
+                    time.sleep(.4)
+                    assert app.poll() is None, 'App exited while dragging an endpoint; see app.log'
+                    edited=json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])['strokes'][-1]['points'][:2]
+                    assert edited[0] == original[0], (edited,original)
+                    assert edited[1][0] > original[1][0]+80 and edited[1][1] > original[1][1]+40
+                    subprocess.run(['grim',str(output / 'edited-arrow.png')],env=env,check=True)
+                    point('move 375 475 936 702')
+                    point('down')
+                    point('move 405 505 936 702')
+                    point('up')
+                    time.sleep(.4)
+                    moved=json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])['strokes'][-1]['points'][:2]
+                    assert abs((moved[0][0]-edited[0][0])-(moved[1][0]-edited[1][0])) < 1e-8
+                    assert moved[0][0] > edited[0][0]+20 and moved[0][1] > edited[0][1]+20
+                    key('-M','ctrl','z','-m','ctrl')
+                    restored=json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])['strokes'][-1]['points'][:2]
+                    assert restored == edited
+                    click(34,387)
+                    click(340,437)  # Rectangle, second row of the diagram palette.
+                    point('move 550 300 936 702')
+                    point('down')
+                    point('move 740 420 936 702')
+                    point('up')
+                    time.sleep(.4)
+                    rectangle=json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])['strokes'][-1]
+                    assert rectangle['diagram_shape']=='Rectangle', rectangle
+                    click(34,431)
+                    click(645,360)
+                    pad=(max(rectangle['width']*4,1)+8)*zoom
+                    hx,hy=round(740+pad),round(420+pad)
+                    subprocess.run(['grim',str(output/'shape-handles.png')],env=env,check=True)
+                    point(f'move {hx} {hy} 936 702')
+                    point('down')
+                    for i in range(1,11):
+                        point(f'move {hx+i*5} {hy+i*3} 936 702')
+                    point('up')
+                    time.sleep(.4)
+                    assert app.poll() is None, 'App exited during shape resize'
+                    resized=json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])['strokes'][-1]
+                    assert resized['points'][0]==rectangle['points'][0]
+                    assert abs((resized['points'][2][0]-rectangle['points'][2][0])*zoom-50)<.1
+                    assert abs((resized['points'][2][1]-rectangle['points'][2][1])*zoom-30)<.1
+                    assert resized['width']==rectangle['width']
+                    subprocess.run(['grim',str(output/'resized-shape.png')],env=env,check=True)
+                    key('-M','ctrl','z','-m','ctrl')
+                    assert json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])['strokes'][-1]==rectangle
+                    click(375,475)  # Select the edited arrow again.
+                    click(575,65)  # Magnet: same tool and selection, now snapping on.
+                    point('move 500 550 936 702')
+                    point('down')
+                    point('move 545 363 936 702')
+                    time.sleep(.2)
+                    subprocess.run(['grim',str(output/'magnet-active.png')],env=env,check=True)
+                    point('up')
+                    time.sleep(.4)
+                    snapped=json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])['strokes'][1]['points'][:2]
+                    assert snapped[0] == edited[0], (snapped,edited)
+                    assert abs(80+snapped[1][0]*zoom-550)<.1, snapped
+                    assert abs(98+snapped[1][1]*zoom-360)<.1, snapped
+                    subprocess.run(['grim',str(output/'magnet-released.png')],env=env,check=True)
+                    key('-M','ctrl','z','-m','ctrl')
+                    assert json.loads(db.execute('SELECT payload FROM pages').fetchone()[0])['strokes'][1]['points'][:2] == edited
+                    click(575,65)  # Turn snapping off again.
                     sway('output HEADLESS-1 transform 90')
                     time.sleep(.5)
                     subprocess.run(['grim', str(output / 'portrait.png')], env=env, check=True)
@@ -110,14 +214,42 @@ def main():
                     key('-k', 'Return')
                     assert db.execute('SELECT count(*) FROM documents').fetchone()[0] == 2
                     assert db.execute("SELECT count(*) FROM documents WHERE title='Draft żółć'").fetchone()[0] == 1
+                    click(34,211)  # Brushes, then its active icon opens the popover.
+                    click(34,211)
+                    subprocess.run(['grim',str(output/'brush-popup.png')],env=env,check=True)
+                    click(342,337)  # Dry brush.
+                    click(385,473)  # Wide.
+                    click(650,620)  # Outside dismiss, with no ink.
+                    point('move 500 420 936 702')
+                    point('down')
+                    for i in range(1,41): point(f'move {500+i*5} {420+i} 936 702')
+                    point('up')
+                    time.sleep(.4)
+                    current=lambda: json.loads(db.execute("SELECT payload FROM pages WHERE document=(SELECT id FROM documents WHERE title='Draft żółć')").fetchone()[0])['strokes']
+                    assert len(current())==1 and current()[0]['tool']=='brush', current()
+                    assert current()[0]['pen']=='Dry' and current()[0]['width']==28, current()
+                    click(34,167)  # Highlighter.
+                    for x,width,y in [(127,2,500),(385,9,570)]:
+                        click(34,167)
+                        subprocess.run(['grim',str(output/'highlighter-popup.png')],env=env,check=True)
+                        click(x,258)
+                        click(650,620)
+                        point(f'move 500 {y} 936 702')
+                        point('down')
+                        point(f'move 700 {y} 936 702')
+                        point('up')
+                        time.sleep(.4)
+                        assert current()[-1]['tool']=='highlighter' and current()[-1]['width']==width, current()
+                    assert len(current())==3
+                    subprocess.run(['grim',str(output/'brush-and-highlighters.png')],env=env,check=True)
                     key('-k', 'F11')
                     key('-k', 'F11')
                     key('-M', 'ctrl', 'q', '-m', 'ctrl')
                     assert app.wait(timeout=10) == 0
                     db.close()
                 (output / 'result.json').write_text(json.dumps({'passed': True,
-                    'checks': ['native Wayland launch', 'Create opens drawing immediately', 'optional title rename', 'pointer ink persisted', 'pen popup and outside dismissal without ink',
-                               'rotation', 'draft preserved across rotation', 'fullscreen', 'clean close']}, indent=2))
+                    'checks': ['native Wayland launch', 'Notebook toolbar action opens drawing immediately', 'optional title rename', 'pointer ink persisted', 'pen popup and outside dismissal without ink',
+                               'hold tool label', 'diagram palette and curved gesture ending at release', 'Select and endpoint handles', 'move arrow body and undo', 'shape resize handles, fixed anchor, persistence and undo', 'magnet toggle, endpoint snap, release and undo', 'brush popover, Dry brush and independent highlighter widths', 'rotation', 'draft preserved across rotation', 'fullscreen', 'clean close']}, indent=2))
                 print('Headless Wayland checks passed')
             finally:
                 if pointer:

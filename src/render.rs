@@ -1,4 +1,4 @@
-use crate::model::{Payload, Point, Stroke, PAGE_H, PAGE_W};
+use crate::model::{Payload, Point, Stroke, Text, PAGE_H, PAGE_W};
 use fontdue::{
     layout::{CoordinateSystem, Layout, LayoutSettings, TextStyle},
     Font, FontSettings,
@@ -80,7 +80,29 @@ pub struct Surface {
     pub contrast: f64,
     pub gamma: f64,
 }
+pub struct SurfaceSnapshot {
+    pixels: Vec<u32>,
+    raw: Vec<u32>,
+}
 impl Surface {
+    pub fn snapshot(&self) -> SurfaceSnapshot {
+        SurfaceSnapshot {
+            pixels: self.pixels.clone(),
+            raw: self.raw.clone(),
+        }
+    }
+    pub fn restore(&mut self, snapshot: &SurfaceSnapshot, rect: Rect) {
+        if self.pixels.len() != snapshot.pixels.len() {
+            return;
+        }
+        for y in rect.y..rect.bottom {
+            let range = y * self.width + rect.x..y * self.width + rect.right;
+            self.pixels[range.clone()].copy_from_slice(&snapshot.pixels[range.clone()]);
+            if self.raw.len() == snapshot.raw.len() && !self.raw.is_empty() {
+                self.raw[range.clone()].copy_from_slice(&snapshot.raw[range]);
+            }
+        }
+    }
     pub fn new() -> Self {
         Self {
             pixels: vec![],
@@ -170,12 +192,18 @@ impl Surface {
     pub fn rounded(&mut self, b: Box2, radius: f64, color: u32) {
         let r = radius.min(b.w / 2.).min(b.h / 2.);
         let bounds = self.rect(b);
+        // A circle has a zero-width center range. Avoid inverted clamp bounds
+        // when fractional positions round x+r and x+w-r differently.
+        let min_x = b.x + r;
+        let max_x = (b.x + b.w - r).max(min_x);
+        let min_y = b.y + r;
+        let max_y = (b.y + b.h - r).max(min_y);
         for y in bounds.y..bounds.bottom {
             for x in bounds.x..bounds.right {
                 let px = (x as f64 + 0.5) / self.scale;
                 let py = (y as f64 + 0.5) / self.scale;
-                let cx = px.clamp(b.x + r, b.x + b.w - r);
-                let cy = py.clamp(b.y + r, b.y + b.h - r);
+                let cx = px.clamp(min_x, max_x);
+                let cy = py.clamp(min_y, max_y);
                 let alpha = ((r - (px - cx).hypot(py - cy)) * self.scale + 0.5).clamp(0., 1.);
                 let i = y * self.width + x;
                 self.pixels[i] = blend(self.pixels[i], color, alpha);
@@ -308,6 +336,15 @@ impl Surface {
         }
     }
     pub fn segment(&mut self, v: View, a: Point, b: Point, stroke: &Stroke) -> Rect {
+        self.segment_raster::<true>(v, a, b, stroke)
+    }
+    fn segment_raster<const SCANLINE: bool>(
+        &mut self,
+        v: View,
+        a: Point,
+        b: Point,
+        stroke: &Stroke,
+    ) -> Rect {
         let old = self.clip;
         self.clip = v.clip;
         let aa = v.screen(a);
@@ -330,13 +367,32 @@ impl Surface {
             _ => 1.,
         };
         let highlight = stroke.tool == "highlighter";
+        let brush = stroke.tool == "brush";
         let width = if highlight {
             (stroke.width * 7.).max(14.)
         } else {
             stroke.width * mult
         };
-        let r = (width * v.zoom * self.scale / 2.).max(0.35);
-        let opacity = if highlight {
+        // Brush pressure tapers continuously between samples; the maximum radius
+        // still bounds the existing fast scanline path conservatively.
+        let brush_radius = |p: f64| {
+            (stroke.width * (0.25 + 1.5 * p.clamp(0.08, 1.)) * v.zoom * self.scale / 2.).max(0.35)
+        };
+        let (ra, rb) = if brush {
+            (brush_radius(a[2]), brush_radius(b[2]))
+        } else {
+            let r = (width * v.zoom * self.scale / 2.).max(0.35);
+            (r, r)
+        };
+        let r = ra.max(rb);
+        let flat = brush && stroke.pen == "Flat";
+        let soft = brush && stroke.pen == "Soft";
+        let dry = brush && stroke.pen == "Dry";
+        let opacity = if soft {
+            0.65
+        } else if dry {
+            0.9
+        } else if highlight {
             0.19
         } else if stroke.pen == "Pencil" {
             0.72
@@ -359,17 +415,77 @@ impl Surface {
         // Per-stroke coverage prevents translucent ink darkening at every input sample.
         let dx = b[0] - a[0];
         let dy = b[1] - a[1];
-        let dd = dx * dx + dy * dy;
+        // A flat brush sweeps a fixed 45-degree elliptical nib. Project in its
+        // local metric so diagonals and direction changes keep a continuous edge.
+        let metric = |x: f64, y: f64| {
+            if flat {
+                (
+                    (x + y) * std::f64::consts::FRAC_1_SQRT_2,
+                    (y - x) * std::f64::consts::FRAC_1_SQRT_2 / 0.28,
+                )
+            } else {
+                (x, y)
+            }
+        };
+        let (mx, my) = metric(dx, dy);
+        let dd = mx * mx + my * my;
         for y in bounds.y..bounds.bottom {
-            for x in bounds.x..bounds.right {
+            // Intersect this row with the segment's antialiased capsule. A long
+            // diagonal must visit pixels near the ink, not its entire rectangle.
+            // Keep the exact coverage calculation below (including round caps).
+            let (left, right) = if SCANLINE && dy.abs() > 1e-9 {
+                let radius = r + 0.5;
+                let t0 = (y as f64 + 0.5 - radius - a[1]) / dy;
+                let t1 = (y as f64 + 0.5 + radius - a[1]) / dy;
+                let lo = t0.min(t1).max(0.);
+                let hi = t0.max(t1).min(1.);
+                if lo > hi {
+                    continue;
+                }
+                let x0 = a[0] + lo * dx;
+                let x1 = a[0] + hi * dx;
+                (
+                    bounds
+                        .x
+                        .max((x0.min(x1) - radius - 1.).floor().max(0.) as usize),
+                    bounds
+                        .right
+                        .min((x0.max(x1) + radius + 1.).ceil().max(0.) as usize),
+                )
+            } else {
+                (bounds.x, bounds.right)
+            };
+            for x in left..right {
+                let (px, py) = metric(x as f64 + 0.5 - a[0], y as f64 + 0.5 - a[1]);
                 let t = if dd > 0. {
-                    (((x as f64 + 0.5 - a[0]) * dx + (y as f64 + 0.5 - a[1]) * dy) / dd)
-                        .clamp(0., 1.)
+                    ((px * mx + py * my) / dd).clamp(0., 1.)
                 } else {
                     0.
                 };
-                let dist = (x as f64 + 0.5 - a[0] - t * dx).hypot(y as f64 + 0.5 - a[1] - t * dy);
-                let alpha = ((r + 0.5 - dist).clamp(0., 1.) * 255.) as u8;
+                let dist = (px - t * mx).hypot(py - t * my);
+                let radius = ra + (rb - ra) * t;
+                let mut coverage = (radius + 0.5 - dist).clamp(0., 1.);
+                if soft {
+                    let falloff = (1. - (dist / radius).powi(2)).max(0.);
+                    coverage *= falloff * falloff;
+                } else if dry && coverage > 0. {
+                    // Stable paper-space grain: no event-rate randomness, and the
+                    // same pattern after a repaint, reload or PDF export.
+                    let gx = (((x as f64 + 0.5) / self.scale - v.x) / v.zoom * 1.8).floor() as i64;
+                    let gy = (((y as f64 + 0.5) / self.scale - v.y) / v.zoom * 1.8).floor() as i64;
+                    let mut hash = (gx as u64).wrapping_mul(0x9e3779b185ebca87)
+                        ^ (gy as u64).wrapping_mul(0xc2b2ae3d27d4eb4f);
+                    // Avalanche both coordinates; a simple xor leaves visible rows
+                    // and checkerboards in broad strokes.
+                    hash ^= hash >> 30;
+                    hash = hash.wrapping_mul(0xbf58476d1ce4e5b9);
+                    hash ^= hash >> 27;
+                    hash = hash.wrapping_mul(0x94d049bb133111eb);
+                    hash ^= hash >> 31;
+                    let grain = (hash & 255) as f64 / 255.;
+                    coverage *= ((grain - 0.22) / 0.78).clamp(0., 1.);
+                }
+                let alpha = (coverage * 255.) as u8;
                 if alpha == 0 {
                     continue;
                 }
@@ -479,22 +595,159 @@ impl Surface {
             );
         }
         if annotations {
-            for s in &p.strokes {
-                self.stroke(v, s);
-            }
-            for t in &p.texts {
-                self.text(
-                    &t.text,
-                    v.x + t.x * v.zoom,
-                    v.y + t.y * v.zoom,
-                    t.size * v.zoom,
-                    gray_color(t.color),
-                    (PAGE_W - t.x - 24.).max(1.) * v.zoom,
-                    t.font == "Serif",
-                );
-            }
+            self.objects(v, &p.strokes, &p.texts);
         }
         self.clip = old;
+    }
+    fn objects(&mut self, v: View, strokes: &[Stroke], texts: &[Text]) {
+        for s in strokes {
+            self.stroke(v, s);
+        }
+        for t in texts {
+            self.text(
+                &t.text,
+                v.x + t.x * v.zoom,
+                v.y + t.y * v.zoom,
+                t.size * v.zoom,
+                gray_color(t.color),
+                (PAGE_W - t.x - 24.).max(1.) * v.zoom,
+                t.font == "Serif",
+            );
+        }
+    }
+    /// Cache the fixed layers below an edit once, retaining the exact draw order.
+    pub fn object_background(
+        &mut self,
+        view: View,
+        payload: &Payload,
+        pdf: Option<&image::RgbImage>,
+        first_stroke: usize,
+        first_text: usize,
+    ) -> SurfaceSnapshot {
+        let previous = self.snapshot();
+        let mut lower = payload.clone();
+        lower.strokes.truncate(first_stroke);
+        lower.texts.truncate(first_text);
+        let rect = self.repaint_page_region(view, &lower, pdf, view.clip);
+        let background = self.snapshot();
+        self.restore(&previous, rect);
+        background
+    }
+    /// Restore cached lower layers, then paint the edited object and layers above
+    /// it. PDF/template/text layout and earlier ink are not rerendered per sample.
+    #[allow(clippy::too_many_arguments)]
+    pub fn repaint_objects(
+        &mut self,
+        view: View,
+        payload: &Payload,
+        background: &SurfaceSnapshot,
+        first_stroke: usize,
+        first_text: usize,
+        region: Box2,
+    ) -> Rect {
+        let old_clip = self.clip;
+        self.clip = view.clip;
+        let rect = self.rect(region);
+        if rect.x >= rect.right || rect.y >= rect.bottom {
+            self.clip = old_clip;
+            return rect;
+        }
+        self.restore(background, rect);
+        let clip = Box2::new(
+            rect.x as f64 / self.scale,
+            rect.y as f64 / self.scale,
+            (rect.right - rect.x) as f64 / self.scale,
+            (rect.bottom - rect.y) as f64 / self.scale,
+        );
+        let lut = self.tone_lut.take();
+        if lut.is_some() {
+            for y in rect.y..rect.bottom {
+                let row = y * self.width + rect.x..y * self.width + rect.right;
+                self.pixels[row.clone()].copy_from_slice(&self.raw[row]);
+            }
+        }
+        self.clip = clip;
+        self.objects(
+            View { clip, ..view },
+            &payload.strokes[first_stroke..],
+            &payload.texts[first_text..],
+        );
+        if let Some(table) = &lut {
+            for y in rect.y..rect.bottom {
+                for x in rect.x..rect.right {
+                    let i = y * self.width + x;
+                    self.raw[i] = self.pixels[i];
+                    self.pixels[i] = toned(self.pixels[i], table);
+                }
+            }
+        }
+        self.tone_lut = lut;
+        self.clip = old_clip;
+        rect
+    }
+    /// Rebuild only the dirty region, preserving raw pixels outside it and draw order.
+    pub fn repaint_page_region(
+        &mut self,
+        view: View,
+        payload: &Payload,
+        pdf: Option<&image::RgbImage>,
+        region: Box2,
+    ) -> Rect {
+        let old_clip = self.clip;
+        self.clip = view.clip;
+        let rect = self.rect(region);
+        if rect.x >= rect.right || rect.y >= rect.bottom {
+            self.clip = old_clip;
+            return rect;
+        }
+        let clip = Box2::new(
+            rect.x as f64 / self.scale,
+            rect.y as f64 / self.scale,
+            (rect.right - rect.x) as f64 / self.scale,
+            (rect.bottom - rect.y) as f64 / self.scale,
+        );
+        let lut = self.tone_lut.take();
+        self.clip = clip;
+        self.fill(clip, BACK);
+        self.page(View { clip, ..view }, payload, pdf, true);
+        if let Some(table) = &lut {
+            for y in rect.y..rect.bottom {
+                for x in rect.x..rect.right {
+                    let i = y * self.width + x;
+                    self.raw[i] = self.pixels[i];
+                    self.pixels[i] = toned(self.pixels[i], table);
+                }
+            }
+        }
+        self.tone_lut = lut;
+        self.clip = old_clip;
+        rect
+    }
+    pub fn text_bounds(&self, text: &Text) -> Box2 {
+        let serif = text.font == "Serif";
+        let mut layout = Layout::new(CoordinateSystem::PositiveYDown);
+        layout.reset(&LayoutSettings {
+            x: text.x as f32,
+            y: text.y as f32,
+            max_width: Some((PAGE_W - text.x - 24.).max(1.) as f32),
+            line_height: if serif { 1.28 } else { 1.0 },
+            ..LayoutSettings::default()
+        });
+        layout.append(
+            &self.fonts,
+            &TextStyle::new(&text.text, text.size as f32, usize::from(serif)),
+        );
+        let right = layout
+            .glyphs()
+            .iter()
+            .map(|g| g.x as f64 + g.width as f64)
+            .fold(text.x, f64::max);
+        Box2::new(
+            text.x,
+            text.y,
+            (right - text.x).max(1.),
+            (layout.height() as f64).max(text.size),
+        )
     }
     fn template(&mut self, v: View, name: &str) {
         let line = |s: &mut Self, x: f64, y: f64, xx: f64, yy: f64| {
@@ -613,4 +866,70 @@ fn toned(p: u32, lut: &[u32; 256]) -> u32 {
         | (lut[((p >> 16) & 255) as usize] << 16)
         | (lut[((p >> 8) & 255) as usize] << 8)
         | lut[(p & 255) as usize]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scanline_capsules_match_exhaustive_raster_for_clips_caps_pressure_and_tone() {
+        let mut fast = Surface::new();
+        let mut reference = Surface::new();
+        for scale in [1, 2] {
+            fast.resize(140, 180, scale);
+            reference.resize(140, 180, scale);
+            let v = View {
+                x: 3.2,
+                y: 4.7,
+                zoom: 0.85,
+                clip: Box2::new(9.25, 11.5, 110.5, 145.25),
+            };
+            fast.tone(v.clip, 1.3, 0.8);
+            reference.tone(v.clip, 1.3, 0.8);
+            for i in 0..180 {
+                let angle = i as f64 * std::f64::consts::TAU / 180.;
+                let a = [72.3 + 120. * angle.cos(), 88.7 + 145. * angle.sin(), 0.17];
+                let b = if i % 11 == 0 {
+                    a
+                } else {
+                    [72.3 - 95. * angle.cos(), 88.7 - 115. * angle.sin(), 0.94]
+                };
+                let s = Stroke {
+                    width: [0.3, 2.4, 8., 22.][i % 4],
+                    pen: if i % 3 == 0 {
+                        crate::model::BRUSHES[(i / 3) % 4]
+                    } else {
+                        ["Fineliner", "Ballpoint", "Pencil", "Calligraphy"][i % 4]
+                    }
+                    .into(),
+                    tool: if i % 3 == 0 {
+                        "brush"
+                    } else if i % 5 == 0 {
+                        "highlighter"
+                    } else {
+                        "pen"
+                    }
+                    .into(),
+                    color: 0.3,
+                    ..Stroke::default()
+                };
+                fast.begin_stroke();
+                reference.begin_stroke();
+                for (a, b) in [(a, a), (a, b), (b, a)] {
+                    let actual = fast.segment(v, a, b, &s);
+                    let expected = reference.segment_raster::<false>(v, a, b, &s);
+                    assert_eq!(actual, expected);
+                }
+                assert!(
+                    fast.pixels == reference.pixels,
+                    "Visible raster differs at angle {i}, scale {scale}"
+                );
+                assert!(
+                    fast.raw == reference.raw,
+                    "Untinted raster differs at angle {i}, scale {scale}"
+                );
+            }
+        }
+    }
 }

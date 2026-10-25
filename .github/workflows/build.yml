@@ -1,7 +1,7 @@
 name: Test and package Linux
 on:
   push:
-    branches: ['**']
+    branches: [main]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -28,8 +28,18 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
-      - run: cargo run --locked -- --smoke artifacts/smoke
+      - name: Three-client collaboration against the real relay
+        run: |
+          git clone https://github.com/porcupin26/pinepaper-relayserver.git "$RUNNER_TEMP/relay"
+          git -C "$RUNNER_TEMP/relay" checkout a53c039aa4f1db16be4dc3ac89f700fdd634a4eb
+          cargo build --locked --manifest-path "$RUNNER_TEMP/relay/Cargo.toml" --target-dir target/relay-test
+          PINEPAPER_EXCHANGE_BIND=127.0.0.1:18787 target/relay-test/debug/pinepaper-exchange &
+          relay_pid=$!
+          trap 'kill "$relay_pid"; wait "$relay_pid" || true' EXIT
+          curl --fail --silent --retry 10 --retry-connrefused --retry-delay 1 http://127.0.0.1:18787/healthz
+          PINEPAPER_EXCHANGE_TEST_URL=http://127.0.0.1:18787 cargo test --locked live_three_clients -- --ignored --nocapture
       - run: cargo build --release --locked --bin pinepaper --example wayland_pointer
+      - run: target/release/pinepaper --smoke artifacts/smoke
       - run: python3 tests/wayland_smoke.py
       - run: desktop-file-validate packaging/eu.pinepaper.PinePaper.Rust.desktop
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

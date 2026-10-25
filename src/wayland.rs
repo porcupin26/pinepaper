@@ -8,7 +8,7 @@ use memmap2::MmapMut;
 use std::io::Read;
 use std::{collections::HashMap, fs::File, os::fd::AsFd, time::Instant};
 use wayland_client::{
-    backend::ObjectId,
+    backend::{ObjectId, WaylandError},
     delegate_noop, event_created_child,
     protocol::{
         wl_buffer, wl_compositor, wl_keyboard, wl_output, wl_pointer, wl_registry, wl_seat, wl_shm,
@@ -229,7 +229,7 @@ impl State {
         if p.start && p.inside {
             self.app.down(p.p.x, p.p.y, p.pressure, false);
         } else if (p.down || p.end) && p.moved {
-            self.app.motion(p.p.x, p.p.y, p.pressure);
+            self.app.queue_motion(p.p.x, p.p.y, p.pressure);
         }
         if p.end {
             self.app.up(p.p.x, p.p.y);
@@ -618,7 +618,7 @@ impl Dispatch<wl_pointer::WlPointer, ()> for State {
                     y: surface_y,
                 };
                 if s.pointer_down {
-                    s.app.motion(surface_x, surface_y, 0.5);
+                    s.app.queue_motion(surface_x, surface_y, 0.5);
                 }
             }
             wl_pointer::Event::Button {
@@ -668,7 +668,7 @@ impl Dispatch<wl_touch::WlTouch, ()> for State {
             }
             wl_touch::Event::Motion { id, x, y, .. } if s.touch == Some(id) => {
                 s.touch_position = Point { x, y };
-                s.app.motion(x, y, 0.5);
+                s.app.queue_motion(x, y, 0.5);
             }
             wl_touch::Event::Up { id, .. } if s.touch == Some(id) => {
                 s.app.up(s.touch_position.x, s.touch_position.y);
@@ -913,6 +913,16 @@ impl Drop for Keyboard {
         }
     }
 }
+// Nonblocking Wayland I/O can legitimately report EAGAIN after readiness
+// notification or when the compositor's receive queue fills during fast input.
+fn nonblocking<T>(result: Result<T, WaylandError>) -> Result<Option<T>, WaylandError> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        // The Wayland backend latches other errors as fatal; only EAGAIN is retryable.
+        Err(WaylandError::Io(ref e)) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
+        Err(e) => Err(e),
+    }
+}
 pub fn run(app: App) -> Result<()> {
     let connection = Connection::connect_to_env()?;
     let mut queue = connection.new_event_queue();
@@ -922,39 +932,99 @@ pub fn run(app: App) -> Result<()> {
     queue.roundtrip(&mut state)?;
     state.initialize(&qh)?;
     let mut hint = false;
-    while state.app.running {
-        queue.dispatch_pending(&mut state)?;
-        state.present(&qh)?;
-        connection.flush()?;
-        if state.configured && !hint {
-            hint = true;
-            let h = state.app.prefs.display_hint.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(400));
-                let _ = crate::platform::set_hint(&h);
-            });
-        }
-        if let Some(guard) = queue.prepare_read() {
-            let fd = connection.as_fd();
-            let mut fds = [rustix::event::PollFd::new(
-                &fd,
-                rustix::event::PollFlags::IN,
-            )];
-            let ready = rustix::event::poll(
-                &mut fds,
-                Some(&rustix::event::Timespec {
-                    tv_sec: 0,
-                    tv_nsec: 50_000_000,
-                }),
-            )?;
-            if ready > 0 {
-                guard.read()?;
-            } else {
-                drop(guard);
+    let result = (|| -> Result<()> {
+        while state.app.running {
+            queue.dispatch_pending(&mut state)?;
+            state.present(&qh)?;
+            let write_pending = nonblocking(connection.flush())?.is_none();
+            if state.configured && !hint {
+                hint = true;
+                let h = state.app.prefs.display_hint.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(400));
+                    let _ = crate::platform::set_hint(&h);
+                });
+            }
+            if let Some(guard) = queue.prepare_read() {
+                let fd = connection.as_fd();
+                use rustix::event::PollFlags;
+                let interests = PollFlags::IN
+                    | if write_pending {
+                        PollFlags::OUT
+                    } else {
+                        PollFlags::empty()
+                    };
+                let mut fds = [rustix::event::PollFd::new(&fd, interests)];
+                let ready = rustix::event::poll(
+                    &mut fds,
+                    Some(&rustix::event::Timespec {
+                        tv_sec: 0,
+                        tv_nsec: 50_000_000,
+                    }),
+                );
+                match ready {
+                    Ok(n)
+                        if n > 0
+                            && fds[0]
+                                .revents()
+                                .intersects(PollFlags::IN | PollFlags::ERR | PollFlags::HUP) =>
+                    {
+                        nonblocking(guard.read())?;
+                    }
+                    Ok(_) => drop(guard), // Writable-only readiness retries the flush next turn.
+                    Err(rustix::io::Errno::INTR) => drop(guard),
+                    Err(e) => return Err(e.into()),
+                }
             }
         }
-    }
+        Ok(())
+    })();
+    // Preserve a gesture in progress even if the compositor really disconnects.
     state.app.finish();
     state.app.saver.flush()?;
-    Ok(())
+    result
+}
+
+#[cfg(test)]
+mod io_tests {
+    use super::*;
+    use std::os::unix::net::UnixStream;
+    #[test]
+    fn temporarily_full_wayland_socket_retries_and_empty_reads_do_not_exit() {
+        let (client, mut server) = UnixStream::pair().unwrap();
+        let connection = Connection::from_socket(client).unwrap();
+        let queue = connection.new_event_queue::<State>();
+        let qh = queue.handle();
+        let mut blocked = false;
+        for _ in 0..4096 {
+            connection.display().get_registry(&qh, ());
+            if nonblocking(connection.flush()).unwrap().is_none() {
+                blocked = true;
+                break;
+            }
+        }
+        assert!(blocked, "Test must fill a real Wayland socket");
+        server.set_nonblocking(true).unwrap();
+        let mut bytes = [0; 8192];
+        loop {
+            match server.read(&mut bytes) {
+                Ok(0) => panic!("Unexpected disconnect"),
+                Ok(_) => (),
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(e) => panic!("{e}"),
+            }
+        }
+        assert!(nonblocking(connection.flush()).unwrap().is_some());
+        assert!(nonblocking(queue.prepare_read().unwrap().read())
+            .unwrap()
+            .is_none());
+        assert!(nonblocking::<()>(Err(WaylandError::Io(
+            std::io::ErrorKind::Interrupted.into()
+        )))
+        .is_err());
+        assert!(
+            nonblocking::<()>(Err(WaylandError::Io(std::io::ErrorKind::BrokenPipe.into())))
+                .is_err()
+        );
+    }
 }

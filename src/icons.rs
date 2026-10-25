@@ -11,6 +11,9 @@ pub enum Icon {
     Next,
     Close,
     Plus,
+    PlusCircle,
+    ChevronDown,
+    List,
     Menu,
     Settings,
     Search,
@@ -20,9 +23,13 @@ pub enum Icon {
     Book,
     Pen,
     Highlighter,
+    Brush,
     Eraser,
     Lasso,
     Text,
+    Diagram,
+    Select,
+    Magnet,
     Undo,
     Redo,
     Download,
@@ -61,6 +68,32 @@ impl Icon {
             mirror: matches!(self, Self::Next | Self::Redo),
         };
         match self {
+            Self::Magnet => {
+                p.path(&[(3., 13.), (3., 3.), (8., 3.), (8., 13.)]);
+                p.arc((12., 13.), (4., 4.), 0., PI);
+                p.path(&[(16., 13.), (16., 3.), (21., 3.), (21., 13.)]);
+                p.arc((12., 13.), (9., 9.), 0., PI);
+                p.path(&[(3., 8.), (8., 8.)]);
+                p.path(&[(16., 8.), (21., 8.)]);
+            }
+            Self::Select => {
+                p.path(&[
+                    (5., 2.),
+                    (5., 20.),
+                    (10., 15.),
+                    (14., 23.),
+                    (18., 21.),
+                    (14., 13.),
+                    (21., 13.),
+                    (5., 2.),
+                ]);
+            }
+            Self::Diagram => {
+                p.rect(2., 2., 8., 7.);
+                p.path(&[(6., 9.), (6., 17.), (14., 17.)]);
+                p.path(&[(11., 14.), (14., 17.), (11., 20.)]);
+                p.arc((19., 17.), (4., 4.), 0., TAU);
+            }
             Self::Share => {
                 p.path(&[(8., 11.), (16., 6.)]);
                 p.path(&[(8., 13.), (16., 18.)]);
@@ -76,9 +109,19 @@ impl Icon {
                 p.path(&[(6., 6.), (18., 18.)]);
                 p.path(&[(18., 6.), (6., 18.)]);
             }
-            Self::Plus => {
+            Self::Plus | Self::PlusCircle => {
+                if matches!(self, Self::PlusCircle) {
+                    p.arc((12., 12.), (10., 10.), 0., TAU);
+                }
                 p.path(&[(12., 5.), (12., 19.)]);
                 p.path(&[(5., 12.), (19., 12.)]);
+            }
+            Self::ChevronDown => p.path(&[(5., 9.), (12., 16.), (19., 9.)]),
+            Self::List => {
+                for y in [5., 12., 19.] {
+                    p.rect(3., y - 1., 2., 2.);
+                    p.path(&[(9., y), (22., y)]);
+                }
             }
             Self::Menu => {
                 for y in [6., 12., 18.] {
@@ -137,6 +180,20 @@ impl Icon {
                     (4., 20.),
                 ]);
                 p.path(&[(14., 6.), (18., 10.)]);
+            }
+            Self::Brush => {
+                p.path(&[(10., 15.), (18., 3.), (22., 5.), (14., 17.), (10., 15.)]);
+                p.path(&[
+                    (10., 15.),
+                    (7., 15.),
+                    (5., 17.),
+                    (4., 20.),
+                    (2., 22.),
+                    (8., 22.),
+                    (12., 20.),
+                    (14., 17.),
+                ]);
+                p.path(&[(6., 20.), (8., 18.)]);
             }
             Self::Highlighter => {
                 p.path(&[(4., 17.), (9., 12.), (13., 16.), (8., 21.), (4., 17.)]);

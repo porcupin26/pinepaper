@@ -1,8 +1,10 @@
 //! Monochrome, touch-sized controls. Widgets never participate in the live ink path.
+mod library;
 use crate::{
     app::{Action, App, Dialog, Input, Screen, Settings, SliderSetting, SwitchSetting},
+    diagram::Shape,
     icons::Icon,
-    model::{Stroke, PAGE_H, PAGE_W, PENS},
+    model::{Stroke, BRUSHES, BRUSH_SIZES, HIGHLIGHTER_SIZES, PAGE_H, PAGE_W, PENS, PEN_SIZES},
     render::{Box2, View, BACK, BLACK, GRAY, LINE, WHITE},
 };
 
@@ -28,6 +30,9 @@ fn button_chrome(a: &mut App, b: Box2, action: Action, selected: bool) -> u32 {
     }
 }
 fn button(a: &mut App, label: &str, b: Box2, action: Action, selected: bool) {
+    if !a.action_available(&action) {
+        return;
+    }
     let color = button_chrome(a, b, action, selected);
     a.surface.centered_label(
         label,
@@ -37,6 +42,9 @@ fn button(a: &mut App, label: &str, b: Box2, action: Action, selected: bool) {
     );
 }
 fn icon_button(a: &mut App, icon: Icon, b: Box2, action: Action, selected: bool) {
+    if !a.action_available(&action) {
+        return;
+    }
     if selected {
         a.surface
             .rounded(Box2::new(b.x + 4., b.y + 2., b.w - 8., b.h - 4.), 4., BLACK);
@@ -58,6 +66,9 @@ fn icon_label_button(
     action: Action,
     selected: bool,
 ) {
+    if !a.action_available(&action) {
+        return;
+    }
     let color = button_chrome(a, b, action, selected);
     icon.draw(
         &mut a.surface,
@@ -80,8 +91,13 @@ fn fullscreen_icon(a: &App) -> Icon {
 }
 fn menu_icon(action: &Action) -> Option<Icon> {
     Some(match action {
+        Action::LibraryHome => Icon::Folder,
+        Action::Filter(kind) if kind == "pdf" => Icon::Text,
+        Action::Filter(_) => Icon::Book,
+        Action::Fullscreen => Icon::Expand,
+        Action::Quit => Icon::Close,
         Action::New(kind) if kind == "folder" => Icon::Folder,
-        Action::New(_) => Icon::Book,
+        Action::New(_) | Action::MakeNotebook | Action::MakeNotebookFrom(_) => Icon::Book,
         Action::Import | Action::Export | Action::Backup => Icon::Download,
         Action::Settings | Action::ExchangeUrl => Icon::Settings,
         Action::Sharing | Action::StartSharing | Action::JoinSharing => Icon::Share,
@@ -168,6 +184,21 @@ pub fn status(a: &mut App) {
     if a.surface.width == 0 {
         return;
     }
+    if a.screen == Screen::Library {
+        if a.dialog.is_none() && !a.busy {
+            let old_len = a.hits.len();
+            library::footer(a);
+            a.hits.truncate(old_len);
+            let r = a.surface.rect(Box2::new(
+                0.,
+                a.surface.logical_h - 40.,
+                a.surface.logical_w,
+                40.,
+            ));
+            a.dirty(r);
+        }
+        return;
+    }
     let title = "PINEPAPER";
     let old_len = a.hits.len();
     top(a, title);
@@ -192,13 +223,25 @@ pub fn render(a: &mut App) {
     a.hits.clear();
     a.popup_bounds = None;
     match a.screen {
-        Screen::Library => library(a),
+        Screen::Library => library::render(a),
         Screen::Editor => editor(a),
         Screen::Overview => overview(a),
     }
     if let Some(dialog) = a.dialog.clone() {
         a.hits.clear();
         dialog_render(a, dialog);
+    }
+    if a.dialog.is_none() {
+        if let Some((anchor, label)) = a.tool_tip.clone() {
+            let width = (label.len() as f64 * 8. + 28.).min(a.surface.logical_w - 24.);
+            let x = (anchor.x + anchor.w + 10.)
+                .min(a.surface.logical_w - width - 12.)
+                .max(12.);
+            let y = anchor.y.min(a.surface.logical_h - 82.).max(42.);
+            let b = Box2::new(x, y, width, 40.);
+            a.surface.rounded(b, 8., BLACK);
+            a.surface.centered_label(&label, b, 15., WHITE);
+        }
     }
     if a.busy {
         a.hits.clear();
@@ -212,221 +255,8 @@ pub fn render(a: &mut App) {
     }
     a.surface.reset_clip();
 }
-fn library(a: &mut App) {
-    let w = a.surface.logical_w;
-    let h = a.surface.logical_h;
-    top(a, "PINEPAPER");
-    let title = if a.trash {
-        "Trash".into()
-    } else if let Some(id) = &a.folder {
-        a.store
-            .document(id)
-            .map(|d| d.title)
-            .unwrap_or("Folder".into())
-    } else {
-        "My files".into()
-    };
-    icon_button(
-        a,
-        if a.folder.is_some() {
-            Icon::Back
-        } else {
-            Icon::Menu
-        },
-        Box2::new(16., 44., 44., 42.),
-        if a.folder.is_some() {
-            Action::Up
-        } else {
-            Action::LibraryMenu
-        },
-        false,
-    );
-    text(a, &title, 74., 54., 23., BLACK, (w - 440.).max(100.));
-    let mut x = (w - 354.).max(200.);
-    for (icon, bw, action) in [
-        (Icon::Search, 70., Action::Search),
-        (fullscreen_icon(a), 54., Action::Fullscreen),
-        (Icon::Settings, 76., Action::Settings),
-    ] {
-        icon_button(a, icon, Box2::new(x, 44., bw, 42.), action, false);
-        x += bw + 8.;
-    }
-    icon_label_button(
-        a,
-        Icon::Plus,
-        "Create",
-        Box2::new(x, 44., 100., 42.),
-        Action::Create,
-        true,
-    );
-    let mut x = 16.;
-    for (label, kind, bw) in [
-        ("All", "", 48.),
-        ("Notebooks", "notebook", 104.),
-        ("Books", "book", 68.),
-        ("PDFs", "pdf", 60.),
-    ] {
-        button(
-            a,
-            label,
-            Box2::new(x, 100., bw, 36.),
-            Action::Filter(kind.into()),
-            a.filter == kind,
-        );
-        x += bw + 8.;
-    }
-    icon_label_button(
-        a,
-        Icon::Sort,
-        ["Recent", "Name", "Created"][a.sort],
-        Box2::new(w - 140., 100., 124., 36.),
-        Action::Sort,
-        false,
-    );
-    if !a.query.is_empty() {
-        text(
-            a,
-            &format!("Search: {}", a.query),
-            16.,
-            145.,
-            13.,
-            GRAY,
-            w - 40.,
-        );
-    }
-    let cols = ((w - 24.) / 190.).floor().max(2.) as usize;
-    let cw = (w - 32. - (cols - 1) as f64 * 18.) / cols as f64;
-    let ch = (cw * 1.16 + 64.).min(316.);
-    let top = if a.query.is_empty() { 154. } else { 174. };
-    let rows = ((h - top - 48.) / ch).floor().max(1.) as usize;
-    let docs: Vec<_> = a
-        .docs
-        .iter()
-        .skip(a.library_offset)
-        .take(cols * rows)
-        .cloned()
-        .collect();
-    for (i, d) in docs.iter().enumerate() {
-        let x = 16. + (i % cols) as f64 * (cw + 18.);
-        let y = top + (i / cols) as f64 * ch;
-        let ph = ch - 68.;
-        let b = Box2::new(x, y, cw, ph);
-        a.surface.fill(b, WHITE);
-        a.surface.border(b, LINE, 1.);
-        if d.kind == "folder" {
-            let size = (cw * 0.45).min(80.);
-            Icon::Folder.draw(
-                &mut a.surface,
-                Box2::new(x + (cw - size) / 2., y + (ph - size) / 2., size, size),
-                BLACK,
-            );
-        } else if let Ok(pages) = a.store.pages(&d.id) {
-            if let Some(p) = pages.first() {
-                let zoom = ((cw - 16.) / PAGE_W).min((ph - 16.) / PAGE_H);
-                let v = View {
-                    x: x + (cw - PAGE_W * zoom) / 2.,
-                    y: y + 8.,
-                    zoom,
-                    clip: Box2::new(x + 4., y + 4., cw - 8., ph - 8.),
-                };
-                if d.kind == "pdf" {
-                    if let Ok(path) = a.store.source_path(d) {
-                        a.request_thumbnail(&d.id, 0, path);
-                    }
-                }
-                let preview = a.thumbnails.get(&(d.id.clone(), 0));
-                a.surface.page(v, &p.payload, preview, true);
-                if d.kind == "pdf" && preview.is_none() {
-                    text(a, "PDF", x + 14., y + 14., 18., GRAY, cw - 28.);
-                    text(a, &d.title, x + 14., y + 52., 14., BLACK, cw - 28.);
-                }
-            }
-        }
-        a.hits
-            .push((Box2::new(x, y, cw, ch - 12.), Action::Open(d.id.clone())));
-        a.surface.label(
-            &d.title,
-            Box2::new(x, y + ph + 7., cw - 40., 22.),
-            14.,
-            BLACK,
-        );
-        text(
-            a,
-            match d.kind.as_str() {
-                "notebook" => "Notebook",
-                "book" => "Book",
-                "folder" => "Folder",
-                _ => "PDF",
-            },
-            x,
-            y + ph + 31.,
-            11.,
-            GRAY,
-            cw - 44.,
-        );
-        icon_button(
-            a,
-            Icon::More,
-            Box2::new(x + cw - 36., y + ph + 8., 36., 34.),
-            Action::ItemMenu(d.id.clone()),
-            false,
-        );
-    }
-    if a.docs.is_empty() {
-        text(
-            a,
-            if a.trash {
-                "Nothing in the trash"
-            } else {
-                "Your library starts here"
-            },
-            26.,
-            top + 70.,
-            25.,
-            BLACK,
-            w - 52.,
-        );
-        text(
-            a,
-            "Create a notebook or import a PDF, EPUB or text file.",
-            26.,
-            top + 115.,
-            16.,
-            GRAY,
-            w - 52.,
-        );
-    }
-    a.surface.fill(Box2::new(0., h - 44., w, 44.), WHITE);
-    button(
-        a,
-        if a.trash { "My files" } else { "Trash" },
-        Box2::new(16., h - 39., 76., 32.),
-        Action::TrashView,
-        false,
-    );
-    button(
-        a,
-        "Backup",
-        Box2::new(100., h - 39., 82., 32.),
-        Action::Backup,
-        false,
-    );
-    button(
-        a,
-        "Quit",
-        Box2::new(190., h - 39., 64., 32.),
-        Action::Quit,
-        false,
-    );
-    text(
-        a,
-        &format!("{} items · scroll to browse", a.docs.len()),
-        (w - 238.).max(270.),
-        h - 28.,
-        12.,
-        GRAY,
-        225.,
-    );
+pub fn library_scroll_max(a: &App) -> f64 {
+    library::scroll_max(a)
 }
 fn footer(a: &mut App) {
     let w = a.surface.logical_w;
@@ -458,17 +288,14 @@ fn footer(a: &mut App) {
         12.,
         BLACK,
     );
-    // Status updates repaint this footer too, so navigation must be redrawn here.
-    Icon::Back.draw(
-        &mut a.surface,
-        Box2::new(w - 232., h - 30., 24., 24.),
-        BLACK,
-    );
-    Icon::Next.draw(
-        &mut a.surface,
-        Box2::new(w - 196., h - 30., 24., 24.),
-        BLACK,
-    );
+    for (icon, action, x) in [
+        (Icon::Back, Action::Previous, w - 232.),
+        (Icon::Next, Action::Next, w - 196.),
+    ] {
+        if a.action_available(&action) {
+            icon.draw(&mut a.surface, Box2::new(x, h - 30., 24., 24.), BLACK);
+        }
+    }
 }
 fn editor(a: &mut App) {
     let w = a.surface.logical_w;
@@ -503,18 +330,7 @@ fn editor(a: &mut App) {
     }
     a.surface
         .tone(clip, a.prefs.page_contrast, a.prefs.page_gamma);
-    if let Some(b) = a.selection.bounds {
-        a.surface.border(
-            Box2::new(
-                v.x + b.x * v.zoom,
-                v.y + b.y * v.zoom,
-                b.w * v.zoom,
-                b.h * v.zoom,
-            ),
-            GRAY,
-            1.,
-        );
-    }
+    selection_overlay(a);
     top(a, "PINEPAPER");
     if !a.hidden {
         a.surface.fill(Box2::new(0., 93., w, 1.), LINE);
@@ -539,19 +355,20 @@ fn editor(a: &mut App) {
         let title = a.doc.as_ref().map(|d| d.title.clone()).unwrap_or_default();
         a.surface.label(
             &title,
-            Box2::new(66., 42., (w - 418.).max(80.), 42.),
+            Box2::new(66., 42., (w - 468.).max(80.), 42.),
             18.,
             BLACK,
         );
         if let Some(d) = &a.doc {
             a.hits.push((
-                Box2::new(66., 42., (w - 418.).max(80.), 42.),
+                Box2::new(66., 42., (w - 468.).max(80.), 42.),
                 Action::Rename(d.id.clone()),
             ));
         }
         let mark = a.page().is_some_and(|p| p.bookmarked);
-        let mut x = w - 332.;
+        let mut x = w - 382.;
         for (icon, bw, act, sel) in [
+            (Icon::Magnet, 42., Action::Magnet, a.magnet),
             (Icon::Bookmark, 42., Action::Bookmark, mark),
             (Icon::Grid, 66., Action::Overview, false),
             (fullscreen_icon(a), 54., Action::Fullscreen, false),
@@ -561,76 +378,205 @@ fn editor(a: &mut App) {
             icon_button(a, icon, Box2::new(x, 42., bw, 42.), act, sel);
             x += bw + 8.;
         }
-        let mut y = 104.;
-        for (icon, tool) in [
-            (Icon::Pen, "pen"),
-            (Icon::Highlighter, "highlighter"),
-            (Icon::Eraser, "eraser"),
-            (Icon::Lasso, "lasso"),
-            (Icon::Text, "text"),
-        ] {
-            icon_button(
-                a,
-                icon,
-                Box2::new(6., y, 56., 44.),
-                Action::Tool(tool.into()),
-                a.tool == tool,
-            );
-            y += 50.;
-        }
-        a.surface.fill(Box2::new(17., y + 5., 34., 1.), LINE);
-        y += 12.;
-        for (icon, act) in [
-            (Icon::Undo, Action::Undo),
-            (Icon::Redo, Action::Redo),
-            (Icon::Trash, Action::DeleteSelection),
-        ] {
-            icon_button(a, icon, Box2::new(6., y, 56., 42.), act, false);
-            y += 48.;
-        }
-        if y + 45. < h - 38. {
-            icon_button(
-                a,
-                Icon::Plus,
-                Box2::new(6., y, 56., 42.),
-                Action::AddPage,
-                false,
-            );
-        }
+        editor_tools(a);
     }
     footer(a);
     let b = Box2::new(w - 234., h - 32., 28., 28.);
-    a.hits.push((b, Action::Previous));
+    if a.action_available(&Action::Previous) {
+        a.hits.push((b, Action::Previous));
+    }
     let b = Box2::new(w - 198., h - 32., 28., 28.);
-    a.hits.push((b, Action::Next));
+    if a.action_available(&Action::Next) {
+        a.hits.push((b, Action::Next));
+    }
+}
+pub fn selection_overlay(a: &mut App) {
+    let v = a.view;
+    let old = a.surface.clip;
+    a.surface.clip = v.clip;
+    if let Some(b) = a.selection_frame() {
+        a.surface.border(
+            Box2::new(
+                v.x + b.x * v.zoom,
+                v.y + b.y * v.zoom,
+                b.w * v.zoom,
+                b.h * v.zoom,
+            ),
+            GRAY,
+            1.,
+        );
+    }
+    let handles: Vec<_> = if let Some(ends) = a.selected_endpoints() {
+        ends.into_iter().collect()
+    } else {
+        a.selected_resize_handles()
+            .into_iter()
+            .map(|(_, p)| p)
+            .collect()
+    };
+    for p in handles {
+        let q = v.screen(p);
+        a.surface
+            .rounded(Box2::new(q[0] - 7., q[1] - 7., 14., 14.), 7., BLACK);
+        a.surface
+            .rounded(Box2::new(q[0] - 5., q[1] - 5., 10., 10.), 5., WHITE);
+    }
+    if let Some(p) = a.snap_target {
+        let q = v.screen(p);
+        a.surface
+            .rounded(Box2::new(q[0] - 11., q[1] - 11., 22., 22.), 11., BLACK);
+        a.surface
+            .rounded(Box2::new(q[0] - 9., q[1] - 9., 18., 18.), 9., WHITE);
+        a.surface
+            .rounded(Box2::new(q[0] - 3., q[1] - 3., 6., 6.), 3., BLACK);
+    }
+    a.surface.clip = old;
+}
+fn editor_tools(a: &mut App) {
+    let h = a.surface.logical_h;
+    let mut y = 104.;
+    let step = if h < 760. { 44. } else { 50. };
+    for (icon, tool) in [
+        (Icon::Pen, "pen"),
+        (Icon::Highlighter, "highlighter"),
+        (Icon::Brush, "brush"),
+        (Icon::Eraser, "eraser"),
+        (Icon::Lasso, "lasso"),
+        (Icon::Text, "text"),
+        (Icon::Diagram, "diagram"),
+        (Icon::Select, "select"),
+    ] {
+        icon_button(
+            a,
+            icon,
+            Box2::new(6., y, 56., step - 6.),
+            Action::Tool(tool.into()),
+            a.tool == tool,
+        );
+        y += step;
+    }
+    a.surface.fill(Box2::new(17., y + 5., 34., 1.), LINE);
+    y += 12.;
+    for (icon, act) in [
+        (Icon::Undo, Action::Undo),
+        (Icon::Redo, Action::Redo),
+        (Icon::Trash, Action::DeleteSelection),
+    ] {
+        icon_button(a, icon, Box2::new(6., y, 56., 42.), act, false);
+        y += 48.;
+    }
+    if y + 45. < h - 38. {
+        icon_button(
+            a,
+            Icon::Plus,
+            Box2::new(6., y, 56., 42.),
+            Action::AddPage,
+            false,
+        );
+    }
+}
+pub fn refresh_editor_tools(a: &mut App) {
+    if a.screen != Screen::Editor || a.hidden {
+        return;
+    }
+    let unchanged = [Action::Undo, Action::Redo, Action::DeleteSelection]
+        .iter()
+        .all(|action| {
+            a.action_available(action) == a.hits.iter().any(|(_, existing)| existing == action)
+        });
+    if unchanged {
+        return;
+    }
+    let bounds = Box2::new(0., 94., 67., a.surface.logical_h - 128.);
+    a.hits.retain(|(b, _)| !bounds.contains(b.x, b.y));
+    a.surface.fill(bounds, WHITE);
+    editor_tools(a);
+    let r = a.surface.rect(bounds);
+    a.dirty(r);
+}
+pub fn action_label(action: &Action) -> Option<&str> {
+    Some(match action {
+        Action::Tool(t) => match t.as_str() {
+            "pen" => "Pen",
+            "highlighter" => "Highlighter",
+            "brush" => "Brushes",
+            "eraser" => "Eraser",
+            "lasso" => "Lasso",
+            "select" => "Select",
+            "text" => "Text",
+            "diagram" => "Diagram",
+            _ => return None,
+        },
+        Action::Undo => "Undo",
+        Action::Redo => "Redo",
+        Action::DeleteSelection => "Delete selection",
+        Action::AddPage => "Add page",
+        Action::Magnet => "Magnet snapping on / off",
+        Action::Bookmark => "Bookmark page",
+        Action::Overview => "Page overview",
+        Action::Tools => "Show / hide tools",
+        Action::Menu => "Page menu",
+        Action::Library => "My files",
+        Action::Fullscreen => "Toggle fullscreen",
+        Action::Previous => "Previous page",
+        Action::Next => "Next page",
+        _ => return None,
+    })
 }
 fn overview(a: &mut App) {
     let w = a.surface.logical_w;
     let h = a.surface.logical_h;
-    top(a, "PAGE OVERVIEW");
+    let selecting = a.page_selection.is_some();
+    top(
+        a,
+        if selecting {
+            "MOVE QUICK SHEETS PAGES"
+        } else {
+            "PAGE OVERVIEW"
+        },
+    );
     icon_label_button(
         a,
         Icon::Back,
         "Back",
         Box2::new(16., 44., 94., 42.),
-        Action::Page(a.index),
+        if selecting {
+            Action::CancelPageSelection
+        } else {
+            Action::Page(a.index)
+        },
         false,
     );
-    let title = a.doc.as_ref().map(|d| d.title.clone()).unwrap_or_default();
+    let title = if selecting {
+        "Make notebook".into()
+    } else {
+        a.doc.as_ref().map(|d| d.title.clone()).unwrap_or_default()
+    };
     a.surface.label(
         &title,
         Box2::new(126., 44., (w - 422.).max(60.), 42.),
         20.,
         BLACK,
     );
-    icon_label_button(
-        a,
-        Icon::Grid,
-        "Template",
-        Box2::new(w - 262., 44., 142., 42.),
-        Action::TemplatePanel,
-        false,
-    );
+    if selecting {
+        let count = a.page_selection.as_ref().map_or(0, |ids| ids.len());
+        button(
+            a,
+            &format!("Move {count} pages"),
+            Box2::new(w - 280., 44., 160., 42.),
+            Action::NameNotebook,
+            true,
+        );
+    } else {
+        icon_label_button(
+            a,
+            Icon::Grid,
+            "Template",
+            Box2::new(w - 262., 44., 142., 42.),
+            Action::TemplatePanel,
+            false,
+        );
+    }
     icon_button(
         a,
         fullscreen_icon(a),
@@ -638,20 +584,52 @@ fn overview(a: &mut App) {
         Action::Fullscreen,
         false,
     );
-    let mut x = 16.;
-    for tab in ["Pages", "Bookmarks", "Tags"] {
-        let bw = if tab == "Bookmarks" { 118. } else { 80. };
+    if selecting {
         button(
             a,
-            tab,
-            Box2::new(x, 102., bw, 38.),
-            Action::OverviewTab(tab.into()),
-            a.overview_tab == tab,
+            "Select all",
+            Box2::new(16., 102., 112., 38.),
+            Action::SelectPages(true),
+            false,
         );
-        x += bw + 8.;
+        button(
+            a,
+            "Clear",
+            Box2::new(140., 102., 80., 38.),
+            Action::SelectPages(false),
+            false,
+        );
+        a.surface.label(
+            "Tap pages to select",
+            Box2::new(236., 102., w - 252., 38.),
+            14.,
+            GRAY,
+        );
+    } else {
+        let mut x = 16.;
+        for tab in ["Pages", "Bookmarks", "Tags"] {
+            let bw = if tab == "Bookmarks" { 118. } else { 80. };
+            button(
+                a,
+                tab,
+                Box2::new(x, 102., bw, 38.),
+                Action::OverviewTab(tab.into()),
+                a.overview_tab == tab,
+            );
+            x += bw + 8.;
+        }
+        if a.is_quick_sheets() {
+            button(
+                a,
+                "Make notebook",
+                Box2::new(w - 202., 102., 186., 38.),
+                Action::MakeNotebook,
+                false,
+            );
+        }
     }
     let mut start = 160.;
-    if a.overview_tab == "Tags" {
+    if !selecting && a.overview_tab == "Tags" {
         let tags: std::collections::BTreeSet<_> = a
             .pages
             .iter()
@@ -683,10 +661,13 @@ fn overview(a: &mut App) {
         .pages
         .iter()
         .enumerate()
-        .filter(|(_, p)| match a.overview_tab.as_str() {
-            "Bookmarks" => p.bookmarked,
-            "Tags" => a.tag.as_ref().is_some_and(|t| p.tags.contains(t)),
-            _ => true,
+        .filter(|(_, p)| {
+            selecting
+                || match a.overview_tab.as_str() {
+                    "Bookmarks" => p.bookmarked,
+                    "Tags" => a.tag.as_ref().is_some_and(|t| p.tags.contains(t)),
+                    _ => true,
+                }
         })
         .map(|(i, p)| (i, p.clone()))
         .collect();
@@ -722,11 +703,24 @@ fn overview(a: &mut App) {
                 .or(if *i == a.index { a.pdf.as_ref() } else { None }),
             true,
         );
+        let selected = a
+            .page_selection
+            .as_ref()
+            .map_or(*i == a.index, |ids| ids.contains(&p.id));
         a.surface.border(
             b,
-            if *i == a.index { BLACK } else { LINE },
-            if *i == a.index { 2. } else { 1. },
+            if selected { BLACK } else { LINE },
+            if selected { 2. } else { 1. },
         );
+        if selecting && selected {
+            a.surface
+                .rounded(Box2::new(x + cw - 34., y + 6., 28., 28.), 4., BLACK);
+            Icon::Check.draw(
+                &mut a.surface,
+                Box2::new(x + cw - 30., y + 10., 20., 20.),
+                WHITE,
+            );
+        }
         text(
             a,
             &format!("{}{}", i + 1, if *i == a.index { " · current" } else { "" },),
@@ -743,10 +737,17 @@ fn overview(a: &mut App) {
                 BLACK,
             );
         }
-        a.hits
-            .push((Box2::new(x, y, cw, ch - 6.), Action::Page(*i)));
+        a.hits.push((
+            Box2::new(x, y, cw, ch - 6.),
+            if selecting {
+                Action::SelectPage(p.id.clone())
+            } else {
+                Action::Page(*i)
+            },
+        ));
     }
-    if pages.len().saturating_sub(a.overview_offset) < cols * rows
+    if !selecting
+        && pages.len().saturating_sub(a.overview_offset) < cols * rows
         && a.overview_tab == "Pages"
         && a.doc.as_ref().is_some_and(|d| d.kind == "notebook")
     {
@@ -784,7 +785,11 @@ fn overview(a: &mut App) {
     }
     text(
         a,
-        &format!("{} pages · scroll to browse", a.pages.len()),
+        &if selecting {
+            "Selected pages move out of Quick sheets · scroll to browse".into()
+        } else {
+            format!("{} pages · scroll to browse", a.pages.len())
+        },
         18.,
         h - 28.,
         12.,
@@ -798,7 +803,7 @@ fn popover(a: &mut App, title: &str, width: f64, height: f64, beside: bool) -> B
     let width = width.min(w - 32.);
     let height = height.min(h - 64.);
     let anchor = if beside {
-        Box2::new(6., 104., 56., 44.)
+        a.popup_anchor.unwrap_or(Box2::new(6., 104., 56., 44.))
     } else {
         a.popup_anchor.unwrap_or(Box2::new(w - 60., 42., 44., 42.))
     };
@@ -846,6 +851,10 @@ fn popover(a: &mut App, title: &str, width: f64, height: f64, beside: bool) -> B
     b
 }
 fn menu_popup(a: &mut App, title: &str, items: &[(String, Action)]) {
+    if title == "Library" {
+        library::sidebar(a, items);
+        return;
+    }
     let capacity = (((a.surface.logical_h - 170.) / 48.).floor() as usize).clamp(1, 8);
     let count = items.len().min(capacity);
     let scroll = items.len() > capacity;
@@ -913,71 +922,171 @@ fn menu_popup(a: &mut App, title: &str, items: &[(String, Action)]) {
     }
 }
 fn pen_popup(a: &mut App) {
-    let b = popover(a, "Pen", 368., 404., true);
-    text(a, "PEN TYPE", b.x + 16., b.y + 54., 11., GRAY, b.w - 32.);
-    let cw = (b.w - 40.) / 2.;
-    for (i, name) in PENS.iter().enumerate() {
-        let row = Box2::new(
-            b.x + 16. + (i % 2) as f64 * (cw + 8.),
-            b.y + 76. + (i / 2) as f64 * 48.,
-            cw,
-            42.,
+    let brush = a.tool == "brush";
+    let highlighter = a.tool == "highlighter";
+    let nib = a.active_nib().clone();
+    let title = if brush {
+        "Brushes"
+    } else if highlighter {
+        "Highlighter"
+    } else {
+        "Pen"
+    };
+    let b = popover(a, title, 368., if highlighter { 210. } else { 404. }, true);
+    if !highlighter {
+        text(
+            a,
+            if brush { "BRUSH TYPE" } else { "PEN TYPE" },
+            b.x + 16.,
+            b.y + 54.,
+            11.,
+            GRAY,
+            b.w - 32.,
         );
-        let selected = a.nib.pen == *name;
-        if selected {
-            a.surface.rounded(row, 4., BLACK);
+        let types: &[&str] = if brush { &BRUSHES } else { &PENS };
+        let cw = (b.w - 40.) / 2.;
+        for (i, name) in types.iter().enumerate() {
+            let row = Box2::new(
+                b.x + 16. + (i % 2) as f64 * (cw + 8.),
+                b.y + 76. + (i / 2) as f64 * 48.,
+                cw,
+                42.,
+            );
+            let selected = nib.pen == *name;
+            if selected {
+                a.surface.rounded(row, 4., BLACK);
+            }
+            a.hits.push((row, Action::Pen((*name).into())));
+            let ink = Stroke {
+                tool: if brush { "brush" } else { "pen" }.into(),
+                pen: (*name).into(),
+                width: if brush { 6. } else { 1.4 },
+                color: if selected { 1. } else { 0.07 },
+                points: (0..24)
+                    .map(|n| {
+                        [
+                            row.x + 8. + n as f64,
+                            row.y + 22. - (n as f64 / 10.).sin() * 4.,
+                            if brush {
+                                0.15 + 0.8 * n as f64 / 23.
+                            } else {
+                                0.5
+                            },
+                        ]
+                    })
+                    .collect(),
+                ..Stroke::default()
+            };
+            a.surface.stroke(
+                View {
+                    x: 0.,
+                    y: 0.,
+                    zoom: 1.,
+                    clip: row,
+                },
+                &ink,
+            );
+            a.surface.label(
+                name,
+                Box2::new(row.x + 40., row.y, row.w - 44., row.h),
+                a.prefs.ui_font_size.min(14.),
+                if selected { WHITE } else { BLACK },
+            );
         }
-        a.hits.push((row, Action::Pen((*name).into())));
-        let ink = Stroke {
-            pen: (*name).into(),
-            width: 1.4,
-            color: if selected { 1. } else { 0.07 },
-            points: (0..24)
-                .map(|n| {
-                    [
-                        row.x + 8. + n as f64,
-                        row.y + 22. - (n as f64 / 10.).sin() * 4.,
-                        0.5,
-                    ]
-                })
-                .collect(),
-            ..Stroke::default()
-        };
-        a.surface.stroke(
-            View {
-                x: 0.,
-                y: 0.,
-                zoom: 1.,
-                clip: row,
-            },
-            &ink,
-        );
-        a.surface.label(
-            name,
-            Box2::new(row.x + 40., row.y, row.w - 44., row.h),
-            a.prefs.ui_font_size.min(14.),
-            if selected { WHITE } else { BLACK },
-        );
-    }
-    a.surface
-        .fill(Box2::new(b.x + 16., b.y + 224., b.w - 32., 1.), LINE);
-    text(a, "THICKNESS", b.x + 16., b.y + 238., 11., GRAY, b.w - 32.);
-    let cw = (b.w - 48.) / 3.;
-    for (i, (value, label)) in [(1.4, "Fine"), (2.4, "Medium"), (4., "Bold")]
-        .iter()
-        .enumerate()
-    {
-        let row = Box2::new(b.x + 16. + i as f64 * (cw + 8.), b.y + 260., cw, 42.);
-        let color = button_chrome(a, row, Action::Width(*value), a.nib.width == *value);
-        let center = (row.x + 15., row.y + row.h / 2.);
+        if brush {
+            text(
+                a,
+                "Press harder for a wider stroke.",
+                b.x + 16.,
+                b.y + 186.,
+                13.,
+                GRAY,
+                b.w - 32.,
+            );
+        }
         a.surface
-            .line(center, center, value * 2., (color & 255) as f64 / 255.);
-        a.surface.label(
-            label,
-            Box2::new(row.x + 30., row.y, row.w - 34., row.h),
-            13.,
-            color,
+            .fill(Box2::new(b.x + 16., b.y + 224., b.w - 32., 1.), LINE);
+    }
+    let sizes: &[(f64, &str)] = if highlighter {
+        &HIGHLIGHTER_SIZES
+    } else if brush {
+        &BRUSH_SIZES
+    } else {
+        &PEN_SIZES
+    };
+    let y = if highlighter { 78. } else { 260. };
+    text(
+        a,
+        if highlighter { "WIDTH" } else { "THICKNESS" },
+        b.x + 16.,
+        b.y + y - 22.,
+        11.,
+        GRAY,
+        b.w - 32.,
+    );
+    let cw = (b.w - 32. - 8. * (sizes.len() - 1) as f64) / sizes.len() as f64;
+    for (i, (value, label)) in sizes.iter().enumerate() {
+        let row = Box2::new(
+            b.x + 16. + i as f64 * (cw + 8.),
+            b.y + y,
+            cw,
+            if highlighter { 64. } else { 42. },
         );
+        let color = button_chrome(a, row, Action::Width(*value), nib.width == *value);
+        if !brush && !highlighter {
+            let center = (row.x + 15., row.y + row.h / 2.);
+            a.surface
+                .line(center, center, value * 2., (color & 255) as f64 / 255.);
+            a.surface.label(
+                label,
+                Box2::new(row.x + 30., row.y, row.w - 34., row.h),
+                13.,
+                color,
+            );
+        } else {
+            let height = if highlighter {
+                value * 7. / 3.
+            } else {
+                (value / 2.).clamp(2., 14.)
+            };
+            if highlighter {
+                a.surface.rounded(
+                    Box2::new(row.x + 18., row.y + 18. - height / 2., row.w - 36., height),
+                    2.,
+                    color,
+                );
+            } else {
+                a.surface.line(
+                    (row.x + row.w / 2., row.y + 12.),
+                    (row.x + row.w / 2., row.y + 12.),
+                    height,
+                    (color & 255) as f64 / 255.,
+                );
+            }
+            a.surface.centered_label(
+                label,
+                Box2::new(
+                    row.x + 2.,
+                    row.y + if highlighter { 39. } else { 24. },
+                    row.w - 4.,
+                    16.,
+                ),
+                12.,
+                color,
+            );
+        }
+    }
+    if highlighter {
+        text(
+            a,
+            "Translucent ink keeps text visible.",
+            b.x + 16.,
+            b.y + 164.,
+            13.,
+            GRAY,
+            b.w - 32.,
+        );
+        return;
     }
     text(a, "COLOUR", b.x + 16., b.y + 320., 11., GRAY, b.w - 32.);
     let cw = (b.w - 56.) / 4.;
@@ -991,7 +1100,7 @@ fn pen_popup(a: &mut App) {
     .enumerate()
     {
         let row = Box2::new(b.x + 16. + i as f64 * (cw + 8.), b.y + 342., cw, 44.);
-        let selected = (a.nib.color - value).abs() < 0.02;
+        let selected = (nib.color - value).abs() < 0.02;
         a.surface
             .rounded(row, 4., if selected { BLACK } else { LINE });
         a.surface.rounded(
@@ -1017,10 +1126,98 @@ fn pen_popup(a: &mut App) {
         a.hits.push((row, Action::Color(*value)));
     }
 }
+fn diagram_popup(a: &mut App) {
+    let b = popover(a, "Diagram", 384., 404., true);
+    text(
+        a,
+        "Choose a shape, then drag on the page.",
+        b.x + 16.,
+        b.y + 56.,
+        13.,
+        GRAY,
+        b.w - 32.,
+    );
+    let cw = (b.w - 40.) / 2.;
+    for (i, shape) in Shape::ALL.iter().enumerate() {
+        let row = Box2::new(
+            b.x + 16. + (i % 2) as f64 * (cw + 8.),
+            b.y + 86. + (i / 2) as f64 * 48.,
+            cw,
+            42.,
+        );
+        let selected = a.diagram_shape == *shape;
+        let color = button_chrome(a, row, Action::Shape(*shape), selected);
+        let stroke = shape.stroke(
+            [
+                row.x + 8.,
+                row.y
+                    + if matches!(shape, Shape::Rectangle | Shape::Ellipse) {
+                        14.
+                    } else {
+                        10.
+                    },
+                0.5,
+            ],
+            [
+                row.x + 30.,
+                row.y
+                    + if matches!(shape, Shape::Rectangle | Shape::Ellipse) {
+                        28.
+                    } else {
+                        32.
+                    },
+                0.5,
+            ],
+            1.4,
+            (color & 255) as f64 / 255.,
+        );
+        a.surface.stroke(
+            View {
+                x: 0.,
+                y: 0.,
+                zoom: 1.,
+                clip: row,
+            },
+            &stroke,
+        );
+        a.surface.label(
+            shape.label(),
+            Box2::new(row.x + 40., row.y, row.w - 44., row.h),
+            13.,
+            color,
+        );
+    }
+    let cw = (b.w - 48.) / 3.;
+    for (i, (width, label)) in [(1.4, "Fine"), (2.4, "Medium"), (4., "Bold")]
+        .iter()
+        .enumerate()
+    {
+        button(
+            a,
+            label,
+            Box2::new(b.x + 16. + i as f64 * (cw + 8.), b.y + 292., cw, 40.),
+            Action::Width(*width),
+            a.nib.width == *width,
+        );
+    }
+    for (i, (color, label)) in [(0.07, "Black"), (0.45, "Grey"), (0.72, "Light")]
+        .iter()
+        .enumerate()
+    {
+        button(
+            a,
+            label,
+            Box2::new(b.x + 16. + i as f64 * (cw + 8.), b.y + 346., cw, 40.),
+            Action::Color(*color),
+            (a.nib.color - color).abs() < 0.02,
+        );
+    }
+}
 fn dialog_render(a: &mut App, d: Dialog) {
     match &d {
         Dialog::Menu(title, items) => return menu_popup(a, title, items),
         Dialog::PenPanel => return pen_popup(a),
+        Dialog::DiagramPanel => return diagram_popup(a),
         Dialog::Input(i) => return input(a, i),
         _ => (),
     }
@@ -1033,7 +1230,9 @@ fn dialog_render(a: &mut App, d: Dialog) {
     a.surface.fill(card, WHITE);
     a.surface.border(card, LINE, 1.);
     match d {
-        Dialog::Menu(..) | Dialog::PenPanel | Dialog::Input(_) => unreachable!(),
+        Dialog::Menu(..) | Dialog::PenPanel | Dialog::DiagramPanel | Dialog::Input(_) => {
+            unreachable!()
+        }
         Dialog::Settings(s) => settings(a, &s),
         Dialog::Sharing => sharing(a),
         Dialog::Message(title, body) => {
@@ -1130,11 +1329,7 @@ fn dialog_render(a: &mut App, d: Dialog) {
 fn input(a: &mut App, i: &Input) {
     let w = a.surface.logical_w;
     let h = a.surface.logical_h;
-    let kh = if i.keyboard {
-        a.prefs.keyboard_key_height * 4. + 74.
-    } else {
-        0.
-    };
+    let kh = if i.keyboard { keyboard_height(a) } else { 0. };
     let cw = (if i.multiline { 560_f64 } else { 520_f64 }).min(w - 32.);
     let ch = (if i.multiline { 326_f64 } else { 218_f64 }).min(h - kh - 58.);
     let card = Box2::new((w - cw) / 2., 42. + (h - kh - 42. - ch) / 2., cw, ch);
@@ -1226,6 +1421,38 @@ fn input(a: &mut App, i: &Input) {
         keyboard(a, i, h - kh);
     }
 }
+pub fn keyboard_height(a: &App) -> f64 {
+    a.prefs.keyboard_key_height * 4. + 74.
+}
+// Contact/expiry feedback only damages the touched key, never the document.
+pub fn repaint_keys(a: &mut App, keys: &[Box2]) {
+    if keys.is_empty() || a.redraw || a.busy {
+        return;
+    }
+    let Some(Dialog::Input(i)) = a
+        .dialog
+        .clone()
+        .filter(|d| matches!(d, Dialog::Input(i) if i.keyboard))
+    else {
+        return;
+    };
+    let old_clip = a.surface.clip;
+    let old_hits = a.hits.len();
+    let y = a.surface.logical_h - keyboard_height(a);
+    for &bounds in keys {
+        a.surface.clip = bounds;
+        keyboard(a, &i, y);
+        a.hits.truncate(old_hits);
+        a.surface.clip = old_clip;
+        a.dirty(a.surface.rect(bounds));
+    }
+}
+fn key_button(a: &mut App, label: &str, bounds: Box2, action: Action, selected: bool) {
+    button(a, label, bounds, action, selected ^ a.key_flashing(bounds));
+}
+fn key_icon(a: &mut App, icon: Icon, bounds: Box2, action: Action) {
+    icon_button(a, icon, bounds, action, a.key_flashing(bounds));
+}
 fn keyboard(a: &mut App, i: &Input, y: f64) {
     let w = a.surface.logical_w;
     let keyh = a.prefs.keyboard_key_height;
@@ -1242,9 +1469,9 @@ fn keyboard(a: &mut App, i: &Input, y: f64) {
     ] {
         let b = Box2::new(x, y + 6., bw, 32.);
         match action {
-            Action::Left => icon_button(a, Icon::Back, b, action, false),
-            Action::Right => icon_button(a, Icon::Next, b, action, false),
-            _ => button(a, label, b, action, false),
+            Action::Left => key_icon(a, Icon::Back, b, action),
+            Action::Right => key_icon(a, Icon::Next, b, action),
+            _ => key_button(a, label, b, action, false),
         }
         x += bw + 6.;
     }
@@ -1266,7 +1493,7 @@ fn keyboard(a: &mut App, i: &Input, y: f64) {
         let mut x = 8.;
         let yy = y + 44. + r as f64 * (keyh + 4.);
         if r == 2 {
-            button(
+            key_button(
                 a,
                 if i.shift == 2 { "CAPS" } else { "Shift" },
                 Box2::new(x, yy, kw, keyh),
@@ -1281,7 +1508,7 @@ fn keyboard(a: &mut App, i: &Input, y: f64) {
             } else {
                 c.to_string()
             };
-            button(
+            key_button(
                 a,
                 &key,
                 Box2::new(x, yy, kw, keyh),
@@ -1291,12 +1518,11 @@ fn keyboard(a: &mut App, i: &Input, y: f64) {
             x += kw + 5.;
         }
         if r == 2 {
-            icon_button(
+            key_icon(
                 a,
                 Icon::Backspace,
                 Box2::new(x, yy, kw, keyh),
                 Action::Backspace,
-                false,
             );
         }
     }
@@ -1315,7 +1541,7 @@ fn keyboard(a: &mut App, i: &Input, y: f64) {
         (".", 0.8, Action::Key(".".into())),
         ("Enter", 1.7, Action::Key("Enter".into())),
     ] {
-        button(
+        key_button(
             a,
             label,
             Box2::new(x, yy, unit * units - 4., keyh),

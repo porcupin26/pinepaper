@@ -9,14 +9,25 @@ No account is required.
 
 ## Features
 
-- Library grid: notebooks, books, PDFs, folders, search, type filters, sorting,
-  rename, move, recoverable trash, and document/page previews.
-- Create → Notebook opens a drawing page immediately with the pen selected.
+- Library with a slim creation toolbar, compact folder rows, large page previews,
+  grid/list views, global filename search, type filters, sorting, rename, move
+  and recoverable trash. Sort and view choices persist across restarts.
+- Quick sheets opens a fresh page in the same scratch notebook each time,
+  preserving earlier pages, even if the notebook was renamed or moved. Move one,
+  selected or all pages into a named notebook, keeping their order and content.
+- **Notebook** in the library toolbar opens a drawing page immediately with the pen selected.
   Tap the document title to rename it. Pen options and other context menus open
   in compact popovers over the page; tap outside to dismiss without leaving ink.
 - Six pen nibs (ballpoint, fineliner, marker, pencil, mechanical, calligraphy),
-  three weights and grayscale colours; highlighter, whole-stroke eraser, lasso
+  three weights and grayscale colours; four highlighter widths; Round, Flat, Soft
+  and Dry pressure-sensitive brushes in four sizes; whole-stroke eraser, lasso
   selection/movement/deletion, and editable typed notes.
+- Diagram palette: drag to create lines, arrows, double arrows, rectangles,
+  squares, ellipses, circles and diamonds. Each shape is one selectable ink
+  object, with a live preview, line weight and grayscale colour.
+- **Select** tool: tap an object or a shape's interior, then drag it to move it.
+  Lines and arrows expose two endpoint handles; moving either handle rebuilds
+  the line and arrowheads. Existing diagrams work without a library migration.
 - Undo/redo, automatic saving after pen-up, page insertion/deletion, six paper
   templates, bookmarks, tags and page overview.
 - PDF, text EPUB and UTF-8 text import. Originals are copied into the library.
@@ -25,13 +36,16 @@ No account is required.
 - Annotated PDF export and transactionally consistent ZIP library backups.
 - Built-in fullscreen keyboard with QWERTY/QWERTZ/AZERTY, Shift/Caps Lock,
   numbers, punctuation, accented letters, selection, clipboard and cursor keys.
-  Physical keyboards use the compositor's XKB keymap.
+  Tapped keys briefly reverse their colors for 500 ms, with updates limited to
+  the affected keys. Physical keyboards use the compositor's XKB keymap.
 - Responsive portrait/landscape layout, fullscreen button and F11, fit-page or
   fit-width view, finger scrolling, optional finger drawing and pen proximity
   suppression of palm gestures.
-- Rounded buttons with centered labels and pill-shaped library filters.
+- Rounded controls with centered labels and a monochrome navigation sidebar.
 - Monochrome vector toolbar and menu icons, embedded in the app and crisp at
-  every display scale; no system icon theme is required.
+  every display scale; no system icon theme is required. Hold an icon for about
+  half a second to show its name without activating it. Unavailable commands
+  are hidden while the drawing tools keep their positions.
 - Battery percentage and charging indicator, Wi-Fi connection status and
   signal details. Tap the indicators for details; they update every 15 seconds
   and remain visible with the writing toolbar hidden. NetworkManager is read
@@ -47,6 +61,101 @@ No account is required.
   Fullscreen switches the current window and remembers the preference.
   Rapid hardware adjustments keep the latest value; writes are checked and
   rolled back on failure. **Done** closes settings after pending writes finish.
+
+## Interface reference and roadmap
+
+The [feature and UI inventory](docs/remarkable-reference.md) links the official
+reMarkable guides and illustrations, compares their workflows with PinePaper,
+and separates implemented features from planned work. The first phase (0.5.0)
+implements the library layout requested in the reference photograph.
+
+![PinePaper library](docs/images/library-landscape.png)
+
+Use **Menu** for file-type filters, import, sharing, settings, backups and trash.
+Tap **Folder** to create a folder, **Notebook** to open a new drawing page, or
+**Quick sheets** for a fresh page in your scratch notebook. The icon beside the
+sort dropdown switches between grid and list. Scroll with a finger or mouse
+wheel; open an item's three-dot menu to rename, move or trash it. Wi-Fi and
+battery status remain visible at the bottom. Quick sheets creates a new scratch
+notebook if its previous one is in the trash; it never restores deleted files
+implicitly. No library migration is needed for this update.
+
+## Writing tools and Quick sheets
+
+Hold a toolbar icon for roughly **0.55 seconds** to see its name. Release it
+without triggering the command; tap normally to use it. Add page and templates
+appear only in notebooks. Undo/Redo appear when there is a change to reverse,
+and Delete selection appears after selecting objects with Select or Lasso.
+
+Tap the **Diagram** icon below Text. Choose a shape, then drag from one corner
+to another (or from tail to tip for an arrow). Squares and circles keep equal
+width and height. Tap Diagram again to change the shape, line weight or colour.
+Lines and arrows connect the initial contact point to the final pen-up position;
+you can take a curved path while dragging. The preview follows the newest pen
+position, and lifting the pen fixes the endpoint there.
+
+Tap **Highlighter** or **Brushes** to select it, then tap its active icon again
+for a compact popover, just like Pen. **Highlighter** has Fine, Medium, Broad and
+Wide widths (14, 28, 42 and 63 page units). Its transparent shading does not darken
+when retracing within one stroke. Existing highlights keep their original width.
+
+**Brushes** has four styles: **Round** for solid tapered ink, **Flat** for an angled
+nib, **Soft** for shaded edges, and **Dry** for a textured stroke. All respond to
+pressure and offer Fine, Medium, Broad and Wide sizes plus grayscale colours.
+Pen, highlighter and brush preferences are saved independently. Brush marks use
+the same selection, movement, erasing, undo, saving, PDF export and sharing paths
+as handwriting. Both peers need 0.6.5 or newer to display brush textures alike.
+Brushes do not simulate wet paint or pen tilt. The left toolbar compacts in
+landscape so the new brush icon and Add page remain available.
+
+Tap **Select**, the pointer icon below Diagram, to select a shape, an ink stroke
+or a text object. Drag its body to move it; tap empty space to deselect. You can
+also select and move in one drag. Select works with the pen or a finger, even
+when finger drawing is disabled; palm suppression still applies near the pen.
+
+A selected **line, arrow or double arrow** shows a circular handle at each end.
+Drag one handle to change that end while the opposite end stays fixed. Drag the
+shaft to move both ends together. Arrowheads follow the new direction. Handles
+stay the same screen size in portrait, landscape and fit-page views. Small tap
+movements do not edit the document. Select also edits diagrams saved by 0.6.0.
+
+Selected **rectangles, ellipses and diamonds** have round corner and edge
+handles. Drag a corner to change width and height, or an edge to change only that
+dimension; the opposite corner/edge stays fixed. **Squares and circles** have
+four corner handles and keep equal width and height. Line weight stays unchanged.
+Handles have the same screen size at every zoom, including in portrait mode.
+Resizing stops at the page edge and a small minimum size instead of flipping the
+shape. Tiny shapes omit crowded edge handles. Tap the body to move the shape.
+
+Tap the **magnet** (horseshoe) icon in the top toolbar to turn point snapping on
+or off. A black tile means on; it starts off and remembers your choice. With it
+on, moving a diagram with Select or a Lasso group attracts its connection points
+to nearby diagrams. Lines/arrows use their two endpoints; rectangles, squares
+and diamonds use corners and the midpoint of each side; circles and ellipses use
+their four outer points. Freehand ink and text are not snap targets. Groups retain their layout.
+
+Endpoint edits and resize handles also snap, while the opposite endpoint or
+corner/edge stays fixed. Resize targets must be compatible with that fixed anchor
+and, for circles/squares, equal dimensions. A bullseye marks the snapped point
+while dragging. Move farther away to release it, or turn the magnet off for free
+placement. The attraction radius stays the same on screen at every zoom. These
+are placement snaps; moving a shape later does not pull attached arrows with it.
+
+Use **Lasso** to surround and move several objects together. Delete selection or
+the eraser removes objects, and Undo/Redo reverses edits. Changes save on release
+and work in PDF exports and live sharing. Object drags repaint the affected page
+region, preserving overlapping ink and display contrast. Resizing handwriting,
+text and lasso groups, rotation, attached connectors, automatic routing and shape
+recognition remain planned.
+
+To organize Quick sheets, open **Page overview → Make notebook**, or choose
+**Make notebook from pages** in the page menu or the item's library menu. The
+current page starts selected; tap thumbnails or **Select all** to choose others.
+Tap **Move N pages**, enter a name, and save. PinePaper opens the new notebook.
+The pages are **moved**, keeping their ink, typed notes, templates, bookmarks,
+tags and order. The new notebook stays in the same folder. If every page moves,
+Quick sheets retains one fresh blank page. This move is a single database
+transaction; it is not part of drawing Undo/Redo. Back cancels page selection.
 
 ## Install and start
 
@@ -72,16 +181,16 @@ sudo zypper install ./pinepaper-*.rpm
 ```
 
 Start **PinePaper** from the application launcher, or run `pinepaper` in a
-terminal inside your Wayland session. Choose **Create → Notebook** to start
-writing. Tap its title to rename it; **Create → Import** adds an existing file.
-Changes save automatically. **Settings** includes display controls, keyboard
+terminal inside your Wayland session. Choose **Notebook** in the library toolbar to start
+writing. Tap its title to rename it; **Menu → Import** adds an existing file.
+Changes save automatically. **Menu → Settings** includes display controls, keyboard
 preferences and the exchange server URL. The fullscreen button or F11 toggles
 fullscreen; the preference is remembered.
 
 Alternative formats:
 
 - **AppImage:** from the same artifact, run `chmod +x PinePaper-*.AppImage`,
-  then `./PinePaper-0.4.0-x86_64.AppImage` (substitute `aarch64` on ARM).
+  then `./PinePaper-0.6.5-x86_64.AppImage` (substitute `aarch64` on ARM).
   If FUSE is unavailable, prefix the launch with `APPIMAGE_EXTRACT_AND_RUN=1`.
 - **Flatpak:** download the matching `flatpak-x86_64` or `flatpak-aarch64`
   artifact, verify its checksums, then run the commands below. The separate
@@ -93,7 +202,7 @@ Alternative formats:
 
 ```sh
 flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install --user ./PinePaper-0.4.0-x86_64.flatpak
+flatpak install --user ./PinePaper-0.6.5-x86_64.flatpak
 flatpak run eu.pinepaper.PinePaper.Rust
 ```
 
@@ -216,7 +325,7 @@ Ctrl+Q quit. Escape dismisses an open dialog.
 Set **Settings → Sharing → Exchange server** to your server's `https://` URL
 (or `http://` for a trusted local test). Every participant uses the same server.
 Open a document, choose **Page menu → Share document → Share current document**,
-and give the five-character code to others. They choose **Create → Join shared
+and give the five-character code to others. They choose **Menu → Join shared
 document** and enter the code. The sharing screen displays the code and participant
 count; the page footer shows connection status. Use **Leave sharing** to disconnect.
 Opening another document also leaves the current session.
@@ -310,6 +419,18 @@ from motion events. Rendering is antialiased, with per-stroke coverage so
 overlapping highlighter segments do not accumulate opacity within one stroke.
 Raw and display-toned pixels remain separate.
 
+Long diagram segments use narrow scanline bounds instead of scanning the empty
+rectangle around a diagonal. Select and Lasso movement cache unchanged lower
+layers while preserving the order of overlapping ink and text. Diagram and
+object previews use the latest motion in each input batch; freehand ink still
+keeps every sample. Pen-up always applies its final position before saving.
+
+Run `cargo run --release --example interaction_bench` for a repeatable CPU test
+at PineNote resolution using a temporary library. On a PineNote, the 0.6.2 change
+reduced median large-arrow updates from 71 to 5 ms, and object movement from
+103 to 6 ms (223 to 6 ms with 80 background strokes). These numbers measure
+application preview rendering, excluding compositor and physical panel latency.
+
 Hardware status, PDF rendering, thumbnails, imports, exports and backups use
 workers. Full page redraws happen for structural edits, navigation and resize.
 Fixed document coordinates keep annotations attached through rotation.
@@ -329,7 +450,7 @@ The workflow runs formatting, Clippy, tests and visual smoke checks, then builds
 | Flatpak `.flatpak` | Yes | Yes |
 | Portable installation tree `.tar.gz` | Yes | Yes |
 
-Builds run on pushes, pull requests, `v*` tags and manual workflow dispatch.
+Builds run on pushes to `main`, pull requests, `v*` tags and manual workflow dispatch.
 Artifacts and SHA-256 manifests are attached to the workflow run; the workflow
 does not publish releases or upload to distribution repositories. Common native
 packages and AppImages use Ubuntu 22.04 builders (glibc 2.35 baseline). Flatpak
@@ -343,11 +464,11 @@ under `usr/share/licenses/pinepaper/third-party/`.
 Use the ARM64 Arch package on PineNote:
 
 ```sh
-sudo pacman -U pinepaper-0.4.0-1-aarch64.pkg.tar.zst
+sudo pacman -U pinepaper-0.6.5-1-aarch64.pkg.tar.zst
 ```
 
 The source `packaging/PKGBUILD` supports x86_64 and aarch64 after a matching
-`v0.4.0` tag exists. Before that tag exists, use Cargo/nFPM directly. For local
+`v0.6.5` tag exists. Before that tag exists, use Cargo/nFPM directly. For local
 package builds, install Python 3, binutils, curl, tar and zstd, then run:
 
 ```sh
@@ -381,6 +502,8 @@ cargo build --release --locked --bin pinepaper --example wayland_pointer
 python3 tests/wayland_smoke.py
 ```
 
+CI also runs the real three-client collaboration test against a pinned revision
+of the relay, including reconnection and joining while another participant leaves.
 Tests cover transactional persistence, folder cycles, page restrictions,
 backup restoration, EPUB spine order, readable PDF export, hover/contact,
 240 intermediate pen samples, undo/redo, Unicode editing, portrait/landscape
@@ -410,3 +533,8 @@ packaging and project documentation belong in commits.
 
 Code is MIT licensed. Bundled DejaVu font licensing is in
 `assets/FONT-LICENSE.txt`.
+
+Version 0.6.5 also handles temporary Wayland socket backpressure and would-block
+reads without exiting. This fixes the “Resource temporarily unavailable” exit
+seen during fast arrow-endpoint dragging. A real display disconnect finishes and
+flushes the current gesture before the process exits.
